@@ -170,9 +170,9 @@ def train_func(config):
 
     # Export memory profiling results to cluster storage
     run_name = ray.train.get_context().get_experiment_name()
-    prof.export_memory_timeline(
-        f"/mnt/cluster_storage/{run_name}/rank{world_rank}_memory_profile.html"
-    )
+    # prof.export_memory_timeline(
+    #     f"/mnt/cluster_storage/{run_name}/rank{world_rank}_memory_profile.html"
+    # )
 
     # Save the final model for inference
     save_model_for_inference(model, world_rank)
@@ -390,7 +390,7 @@ if __name__ == "__main__":
     # Configure run settings and storage
     run_config = RunConfig(
         # Persistent storage path accessible across all worker nodes
-        storage_path="/mnt/cluster_storage/",
+        storage_path="/iopsstor/scratch/cscs/angeloh/datas",
         # Unique experiment name (use consistent name to resume from checkpoints)
         name=experiment_name,
         # Fault tolerance configuration

@@ -1,0 +1,6 @@
+*.err
+*.out
+.venv/
+chat/
+rustbpe/target/
+__pycache__
