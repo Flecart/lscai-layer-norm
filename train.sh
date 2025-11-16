@@ -41,15 +41,20 @@ CMD="
 # print current environment variables
 echo \"[srun] rank=\$SLURM_PROCID host=\$(hostname) noderank=\$SLURM_NODEID localrank=\$SLURM_LOCALID wrong_host=$(hostname)\"
 
-# run your script which we create in the next step
+# Change to project directory
+cd /users/\$USER/project/lscai-layer-norm || cd /users/\$USER/scratch/lscai-layer-norm
 
-torchrun \
+echo \"Checking CUDA availability with container Python...\"
+python3 -c \"import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA devices: {torch.cuda.device_count() if torch.cuda.is_available() else 0}'); print(f'PyTorch version: {torch.__version__}')\" || echo \"Failed to check CUDA\"
+
+# Add project to PYTHONPATH and use container's python3 directly
+export PYTHONPATH=/users/\$USER/project/lscai-layer-norm:/users/\$USER/scratch/lscai-layer-norm:\$PYTHONPATH
+python3 -m torch.distributed.run \
     --node_rank=\$SLURM_NODEID \
-    --nproc_per_node=4 \
+    --nproc_per_node=$NPROC_PER_NODE \
     --master_addr="${MASTER_ADDR}" \
     --master_port="${MASTER_PORT}" \
-    --nproc_per_node=$NPROC_PER_NODE \
-    -m scripts.base_train -- --depth=20 --run=$WANDB_RUN
+    -m scripts.base_train -- --depth=20 --run=$WANDB_RUN --device_type=cuda
 "
 
 srun bash -c "$CMD"
