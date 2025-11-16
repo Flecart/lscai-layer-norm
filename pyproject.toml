@@ -1,3 +1,7 @@
+[build-system]
+requires = ["maturin>=1.10.1"]
+build-backend = "maturin"
+
 [project]
 name = "lscai-layer-norm"
 version = "0.1.0"
@@ -21,3 +25,7 @@ dependencies = [
     "wandb>=0.21.3",
     "maturin>=1.10.1",
 ]
+
+[tool.maturin]
+manifest-path = "rustbpe/Cargo.toml"
+module-name = "rustbpe"
