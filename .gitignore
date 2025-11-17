@@ -4,3 +4,5 @@
 chat/
 rustbpe/target/
 __pycache__
+.wandb.env
+wandb

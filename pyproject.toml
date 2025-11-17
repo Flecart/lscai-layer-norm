@@ -10,8 +10,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ray[train]>=2.51.1",
-    "torch>=2.9.1",
-    "torchvision>=0.24.1",
     "datasets>=4.0.0",
     "fastapi>=0.117.1",
     "files-to-prompt>=0.6",
@@ -20,10 +18,10 @@ dependencies = [
     "setuptools>=80.9.0",
     "tiktoken>=0.11.0",
     "tokenizers>=0.22.0",
-    "torch>=2.8.0",
     "uvicorn>=0.36.0",
     "wandb>=0.21.3",
     "maturin>=1.10.1",
+    "numpy<2",
 ]
 
 [tool.maturin]
