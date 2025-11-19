@@ -17,4 +17,4 @@ echo "[init_venv.sbatch] running on $(hostname)"
 cd "$HOME/scratch/lscai-layer-norm"
 
 # run the .init_venv.sh script inside the sbatch job
-srun --ntasks=1 --environment=ngc_pt_jan bash init_venv.sh
+srun --ntasks=1 --environment=ngc_pt_jan bash scripts/init_venv.sh

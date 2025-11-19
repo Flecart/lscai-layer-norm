@@ -25,5 +25,5 @@ dependencies = [
 ]
 
 [tool.maturin]
-manifest-path = "rustbpe/Cargo.toml"
+manifest-path = "karpathy/rustbpe/Cargo.toml"
 module-name = "rustbpe"

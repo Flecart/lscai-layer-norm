@@ -16,6 +16,7 @@ set -euo pipefail
 
 cd "$HOME/scratch/lscai-layer-norm"
 
+cd karpathy
 
 # 1) Download a small number of shards (blocking)
 uv run python3 -m nanochat.dataset -n 8

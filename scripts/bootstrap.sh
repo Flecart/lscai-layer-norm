@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$HOME/scratch/lscai-layer-norm"
+SCRIPT_DIR="$PROJECT_DIR/scripts"
 
 echo "[bootstrap] Starting nanochat bootstrap..."
 echo "[bootstrap] Project dir: $PROJECT_DIR"
@@ -48,7 +49,7 @@ srun \
     --container-writable \
     --output=logs/build_img_%j.out \
     --error=logs/build_img_%j.err \
-    bash build_image.sh
+    bash $SCRIPT_DIR/build_image.sh
 
 
 echo "[bootstrap] Build job completed."
@@ -63,13 +64,13 @@ echo "[bootstrap] Build job ID: $BUILD_JOB"
 # this creates the .edf/ngc_pt_jan.toml environment file and uses
 # the personal $USER to point to the .sqsh image created in step 2
 
-if [[ ! -x "create_envfile.sh" ]]; then
-    echo "[bootstrap] ERROR: create_envfile.sh not found or not executable"
+if [[ ! -x "$SCRIPT_DIR/create_envfile.sh" ]]; then
+    echo "[bootstrap] ERROR: $SCRIPT_DIR/create_envfile.sh not found or not executable"
     exit 1
 fi
 
 echo "[bootstrap] Creating EDF environment file via create_envfile.sh..."
-./create_envfile.sh
+bash $SCRIPT_DIR/create_envfile.sh
 
 
 ##########################################################
@@ -87,7 +88,7 @@ echo "[bootstrap] Creating EDF environment file via create_envfile.sh..."
 # we have the advantage that we don't have to rebuild the docker image every time we want to change
 # the python dependencies, we can just modify pyproject.toml and re-run init_venv.sh inside the container
 
-if [[ ! -x "$PROJECT_DIR/init_venv.sh" ]]; then
+if [[ ! -x "$SCRIPT_DIR/init_venv.sh" ]]; then
     echo "[bootstrap] ERROR: init_venv.sh not found or not executable"
     exit 1
 fi
@@ -106,7 +107,7 @@ srun \
     --environment=ngc_pt_jan \
     --output=logs/init_venv_%j.out \
     --error=logs/init_venv_%j.err \
-    bash init_venv.sh
+    bash $SCRIPT_DIR/init_venv.sh
 
 
 echo "[bootstrap] Virtual environment initialization job completed."
@@ -131,10 +132,10 @@ echo " EDF environment file created via:"
 echo "   create_envfile.sh"
 echo 
 echo " Test the tokenizer: "
-echo "   sbatch run_tok_train.sbatch"
+echo "   sbatch $SCRIPT_DIR/run_tok_train.sbatch"
 echo
 echo " Start training with:"
-echo "   sbatch run_nanochat.sbatch"
+echo "   sbatch $SCRIPT_DIR/run_nanochat.sbatch"
 echo
 echo " Monitor jobs with:"
 echo "   squeue --me"

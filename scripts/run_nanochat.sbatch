@@ -62,6 +62,7 @@ if [[ -z "${WANDB_API_KEY:-}" ]]; then
     export WANDB_DISABLED=true
 fi
 
+cd karpathy
 python3 -m torch.distributed.run \
   --nnodes='"$SLURM_NNODES"' \
   --node_rank=$SLURM_NODEID \
