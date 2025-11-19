@@ -2,7 +2,7 @@
 *.out
 .venv/
 chat/
-rustbpe/target/
+*/rustbpe/target/
 __pycache__
 .wandb.env
 wandb
