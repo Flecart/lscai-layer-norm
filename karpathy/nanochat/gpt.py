@@ -23,6 +23,8 @@ from nanochat.common import get_dist_info, print0
 from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
 
+from nanochat.normalization_strategy import NormType, build_norm_strategy
+
 @dataclass
 class GPTConfig:
     sequence_len: int = 1024
@@ -32,10 +34,9 @@ class GPTConfig:
     n_kv_head: int = 6 # number of key/value heads (MQA)
     n_embd: int = 768
 
-
-def norm(x):
-    # Purely functional rmsnorm with no learnable params
-    return F.rms_norm(x, (x.size(-1),))
+    norm_type: str = "rms"  # "rms", "layernorm", "none"
+    norm_eps: float = 1e-6  # used e.g. for RMSNorm
+    qk_norm_type: str | None = None  # if None, reuse norm_type
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -63,6 +64,17 @@ class CausalSelfAttention(nn.Module):
         self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
+        qk_norm_type = config.qk_norm_type
+        # QK norm strategy
+        if qk_norm_type is None:
+            qk_norm_type = config.norm_type
+        self.qk_norm = build_norm_strategy(
+            NormType(qk_norm_type),
+            self.head_dim,
+            eps=config.norm_eps
+        )
+
+
     def forward(self, x, cos_sin, kv_cache):
         B, T, C = x.size()
 
@@ -74,7 +86,11 @@ class CausalSelfAttention(nn.Module):
         # Apply Rotary Embeddings to queries and keys to get relative positional encoding
         cos, sin = cos_sin
         q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
-        q, k = norm(q), norm(k) # QK norm
+
+        # QK norm (strategy can be identity to disable)
+        q = self.qk_norm(q)
+        k = self.qk_norm(k)
+
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2) # make head be batch dim, i.e. (B, T, H, D) -> (B, H, T, D)
 
         # Apply KV cache: insert current k,v into cache, get the full view so far
@@ -129,9 +145,22 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
 
+                # pre-attn and pre-mlp norms (and you can add post norms if you want later)
+        self.pre_attn_norm = build_norm_strategy(
+            NormType(config.norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
+        self.pre_mlp_norm = build_norm_strategy(
+            NormType(config.norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
+
+
     def forward(self, x, cos_sin, kv_cache):
-        x = x + self.attn(norm(x), cos_sin, kv_cache)
-        x = x + self.mlp(norm(x))
+        x = x + self.attn(self.pre_attn_norm(x), cos_sin, kv_cache)
+        x = x + self.mlp(self.pre_mlp_norm(x))
         return x
 
 
@@ -153,6 +182,19 @@ class GPT(nn.Module):
         cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
         self.register_buffer("cos", cos, persistent=False) # persistent=False means it's not saved to the checkpoint
         self.register_buffer("sin", sin, persistent=False)
+
+
+        self.embed_norm = build_norm_strategy(
+            NormType(config.norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
+
+        self.final_norm = build_norm_strategy(
+            NormType(config.norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
 
     def init_weights(self):
         self.apply(self._init_weights)
@@ -254,10 +296,10 @@ class GPT(nn.Module):
 
         # Forward the trunk of the Transformer
         x = self.transformer.wte(idx)
-        x = norm(x)
+        x = self.embed_norm(x)
         for block in self.transformer.h:
             x = block(x, cos_sin, kv_cache)
-        x = norm(x)
+        x = self.final_norm(x)
 
         # Forward the lm_head (compute logits)
         softcap = 15

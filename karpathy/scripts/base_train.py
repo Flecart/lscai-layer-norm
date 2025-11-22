@@ -37,6 +37,14 @@ device_type = "" # cuda|cpu|mps (empty => autodetect good device type default, i
 # Model architecture
 depth = 20 # the depth of the Transformer model to train, rest of the kwargs are derived
 max_seq_len = 2048 # max context length
+
+
+# Normalization
+norm_type = "rms"          # "rms", "learnable_rms", "layernorm", "none"
+qk_norm_type = ""          # "" => use norm_type; or "none", "rms", ...
+norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
+
+
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)
 target_flops = -1.0 # calculate num_iterations to reach target_flops. Useful for scaling laws experiments (-1 = disable)
@@ -111,7 +119,17 @@ def main():
     print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
     # -----------------------------------------------------------------------------
     # Initialize the Model
-    model_config_kwargs = dict(sequence_len=max_seq_len, vocab_size=vocab_size, n_layer=num_layers, n_head=num_heads, n_kv_head=num_kv_heads, n_embd=model_dim)
+    model_config_kwargs = dict(
+        sequence_len=max_seq_len,
+        vocab_size=vocab_size,
+        n_layer=num_layers,
+        n_head=num_heads,
+        n_kv_head=num_kv_heads,
+        n_embd=model_dim,
+        norm_type=norm_type,
+        norm_eps=norm_eps,
+        qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
+    )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)
         model = GPT(model_config)

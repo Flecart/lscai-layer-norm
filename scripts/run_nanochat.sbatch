@@ -33,6 +33,12 @@ export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 NPROC_PER_NODE=4                 # == gpus-per-node
 WANDB_RUN=speedrun               # adjust as you like
 
+# Normalization hyperparameters
+NORM_TYPE=none                  # choose from: layernorm, rms, learnable_rms, none
+QK_NORM_TYPE=none               # choose from: layernorm, rms, learnable_rms, none
+NORM_EPS=1e-6                   # epsilon value for normalization layers
+
+
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
 echo "[srun] rank=$SLURM_PROCID host=$(hostname) node_rank=$SLURM_NODEID local_rank=$SLURM_LOCALID"
@@ -69,7 +75,12 @@ python3 -m torch.distributed.run \
   --nproc_per_node='"$NPROC_PER_NODE"' \
   --master_addr='"$MASTER_ADDR"' \
   --master_port='"$MASTER_PORT"' \
-  -m scripts.base_train -- --depth=20 --run='"$WANDB_RUN"'
+  -m scripts.base_train -- \
+    --depth=20 \
+    --run='"$WANDB_RUN"' \
+    --norm_type='"$NORM_TYPE"' \
+    --qk_norm_type='"$QK_NORM_TYPE"' \
+    --norm_eps='"$NORM_EPS"'
 '
 
 srun bash -c "$CMD"
