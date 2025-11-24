@@ -36,7 +36,10 @@ class GPTConfig:
 
     norm_type: str = "rms"  # "rms", "layernorm", "none"
     norm_eps: float = 1e-6  # used e.g. for RMSNorm
-    qk_norm_type: str | None = None  # if None, reuse norm_type
+    
+    # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
+    qk_norm_type: str | None = "rms"  # if None, reuse norm_type
+    pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -145,7 +148,7 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
 
-                # pre-attn and pre-mlp norms (and you can add post norms if you want later)
+        # pre-attn and pre-mlp norms (and you can add post norms if you want later)
         self.pre_attn_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,

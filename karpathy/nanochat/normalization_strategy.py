@@ -18,7 +18,6 @@ class NormStrategy(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
-        
 
 class RMSNormStrategy(NormStrategy):
     """
@@ -41,11 +40,11 @@ class LearnableRMSNormStrategy(NormStrategy):
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__(dim)
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(dim))
+        self.gamma = nn.Parameter(torch.empty(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = F.rms_norm(x, (x.size(-1),), eps=self.eps)
-        return out * self.gamma
+        out = F.rms_norm(x, (x.size(-1),), self.gamma, eps=self.eps)
+        return out                                                    
 
 
 class LayerNormStrategy(NormStrategy):
