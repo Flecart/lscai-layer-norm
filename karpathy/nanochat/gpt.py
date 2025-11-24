@@ -23,7 +23,7 @@ from nanochat.common import get_dist_info, print0
 from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
 
-from nanochat.normalization_strategy import NormType, build_norm_strategy
+from nanochat.owned.normalization_strategy import NormType, build_norm_strategy
 
 @dataclass
 class GPTConfig:
@@ -187,14 +187,25 @@ class GPT(nn.Module):
         self.register_buffer("sin", sin, persistent=False)
 
 
+        # ANGELO: DELETING THESE, THESE ARE NOT FOCUS OF OUR ANALYSIS
+        # self.embed_norm = build_norm_strategy(
+        #     NormType(config.norm_type),
+        #     config.n_embd,
+        #     eps=config.norm_eps,
+        # )
+
+        # self.final_norm = build_norm_strategy(
+        #     NormType(config.norm_type),
+        #     config.n_embd,
+        #     eps=config.norm_eps,
+        # )
         self.embed_norm = build_norm_strategy(
-            NormType(config.norm_type),
+            NormType("rms"),
             config.n_embd,
             eps=config.norm_eps,
         )
-
         self.final_norm = build_norm_strategy(
-            NormType(config.norm_type),
+            NormType("rms"),
             config.n_embd,
             eps=config.norm_eps,
         )
@@ -262,6 +273,15 @@ class GPT(nn.Module):
         matrix_params = list(self.transformer.h.parameters())
         embedding_params = list(self.transformer.wte.parameters())
         lm_head_params = list(self.lm_head.parameters())
+        if rank == 0:
+            # I was debugging the extra embed and final norm here....
+            print(
+                f"Rank {rank}: Optimizer parameter groups: \n"
+                f"matrix_params={len(matrix_params)}, \n"
+                f"embedding_params={len(embedding_params)}, \n"
+                f"lm_head_params={len(lm_head_params)}\n"
+                f"full model_params={len(list(self.parameters()))}"
+            )
         assert len(list(self.parameters())) == len(matrix_params) + len(embedding_params) + len(lm_head_params)
         # Create the AdamW optimizer for the embedding and lm_head
         # Scale the LR for the AdamW parameters by ∝1/√dmodel (having tuned the LRs for 768 dim model)
