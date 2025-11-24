@@ -98,17 +98,18 @@ class DistMuon(torch.optim.Optimizer):
         consolidate states beforehand.
 
     Args:
-        params: iterable of Tensors
+        params: list of Tensors
         lr: learning rate
         momentum: momentum coefficient in [0,1)
         nesterov: if True, Nesterov-style update (g <- lerp(g, buf, momentum)); else use buf
         ns_steps: number of Newton–Schulz iterations for the orthogonalization
     """
-    def __init__(self, params, lr: float = 0.02, momentum: float = 0.95,
+    def __init__(self, params: list, lr: float = 0.02, momentum: float = 0.95,
                  nesterov: bool = True, ns_steps: int = 5):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
-        params = list(params)
         assert all(p.ndim == 2 for p in params), "Muon expects 2D parameters only"
+        # no p.ndim contains a 1 dimension
+        assert all(min(p.shape) > 1 for p in params), "Muon does not support 0D/1D parameters"
         rank = dist.get_rank()
         # Group all parameters by their shape
         shapes = sorted({p.shape for p in params}) # sort to ensure consistent / deterministic ordering

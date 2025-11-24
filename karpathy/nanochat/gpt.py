@@ -24,6 +24,7 @@ from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
 
 from nanochat.owned.normalization_strategy import NormType, build_norm_strategy
+from nanochat.owned.mlp_fused_strategy import build_mlp_strategy
 
 @dataclass
 class GPTConfig:
@@ -36,6 +37,8 @@ class GPTConfig:
 
     norm_type: str = "rms"  # "rms", "layernorm", "none"
     norm_eps: float = 1e-6  # used e.g. for RMSNorm
+    
+    mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str | None = "rms"  # if None, reuse norm_type
@@ -132,7 +135,12 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
+        self.c_fc = build_mlp_strategy(
+            config.mlp_type,
+            config.n_embd,
+            4 * config.n_embd,
+            bias=False
+        )
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
 
     def forward(self, x):
@@ -270,35 +278,45 @@ class GPT(nn.Module):
         model_dim = self.config.n_embd
         ddp, rank, local_rank, world_size = get_dist_info()
         # Separate out all parameters into 3 groups (matrix, embedding, lm_head)
-        matrix_params = list(self.transformer.h.parameters())
+        block_params = list(self.transformer.h.parameters())
         embedding_params = list(self.transformer.wte.parameters())
         lm_head_params = list(self.lm_head.parameters())
         if rank == 0:
             # I was debugging the extra embed and final norm here....
             print(
                 f"Rank {rank}: Optimizer parameter groups: \n"
-                f"matrix_params={len(matrix_params)}, \n"
+                f"block_params={len(block_params)}, \n"
                 f"embedding_params={len(embedding_params)}, \n"
                 f"lm_head_params={len(lm_head_params)}\n"
                 f"full model_params={len(list(self.parameters()))}"
             )
-        assert len(list(self.parameters())) == len(matrix_params) + len(embedding_params) + len(lm_head_params)
+        assert len(list(self.parameters())) == len(block_params) + len(embedding_params) + len(lm_head_params)
         # Create the AdamW optimizer for the embedding and lm_head
         # Scale the LR for the AdamW parameters by ∝1/√dmodel (having tuned the LRs for 768 dim model)
         dmodel_lr_scale = (model_dim / 768) ** -0.5
         if rank == 0:
             print(f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}")
-        adam_groups = [
-            dict(params=lm_head_params, lr=unembedding_lr * dmodel_lr_scale),
-            dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
-        ]
-        adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
-        AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
-        adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
+
         # Create the Muon optimizer for the linear layers
         muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
         MuonFactory = DistMuon if ddp else Muon
+        
+        block_params = list(block_params)
+        matrix_params = [p for p in block_params if p.ndim == 2]
+        rmsnorm_params = [p for p in block_params if p.ndim == 1]
+        if rank == 0:
+            print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
+            print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
         muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
+
+        adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
+        AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
+        adam_groups = [
+            dict(params=lm_head_params, lr=unembedding_lr * dmodel_lr_scale),
+            dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
+            dict(params=rmsnorm_params, lr=matrix_lr * dmodel_lr_scale),
+        ]
+        adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
         # Combine them the two optimizers into one list
         optimizers = [adamw_optimizer, muon_optimizer]
         for opt in optimizers:

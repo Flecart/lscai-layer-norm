@@ -43,8 +43,8 @@ class LearnableRMSNormStrategy(NormStrategy):
         self.gamma = nn.Parameter(torch.empty(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = F.rms_norm(x, (x.size(-1),), self.gamma, eps=self.eps)
-        return out                                                    
+        out = F.rms_norm(x, (x.size(-1),), eps=self.eps)
+        return out * self.gamma
 
 
 class LayerNormStrategy(NormStrategy):

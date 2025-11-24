@@ -41,6 +41,7 @@ max_seq_len = 2048 # max context length
 
 # Normalization
 norm_type = "rms"          # "rms", "learnable_rms", "layernorm", "none"
+mlp_type = "default"          # "default", "column", "row", "full", "patched"
 qk_norm_type = ""          # "" => use norm_type; or "none", "rms", ...
 norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
 
@@ -127,6 +128,7 @@ def main():
         n_kv_head=num_kv_heads,
         n_embd=model_dim,
         norm_type=norm_type,
+        mlp_type=mlp_type,
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
     )
