@@ -156,12 +156,13 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
 
+        # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
-        self.pre_attn_norm = build_norm_strategy(
-            NormType(config.norm_type),
-            config.n_embd,
-            eps=config.norm_eps,
-        )
+        # self.pre_attn_norm = build_norm_strategy(
+        #     NormType(config.norm_type),
+        #     config.n_embd,
+        #     eps=config.norm_eps,
+        # )
         self.pre_mlp_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,
@@ -170,7 +171,7 @@ class Block(nn.Module):
 
 
     def forward(self, x, cos_sin, kv_cache):
-        x = x + self.attn(self.pre_attn_norm(x), cos_sin, kv_cache)
+        x = x + self.attn(x, cos_sin, kv_cache)
         x = x + self.mlp(self.pre_mlp_norm(x))
         return x
 
