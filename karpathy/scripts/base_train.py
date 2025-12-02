@@ -32,6 +32,7 @@ import wandb
 # -----------------------------------------------------------------------------
 # User settings
 run = "dummy" # wandb run name default ("dummy" is special - we won't log to wandb)
+notes = "" # optional notes for wandb run
 # Runtime
 device_type = "" # cuda|cpu|mps (empty => autodetect good device type default, in order: CUDA > MPS > CPU)
 # Model architecture
@@ -40,9 +41,10 @@ max_seq_len = 2048 # max context length
 
 
 # Normalization
-norm_type = "rms"          # "rms", "learnable_rms", "layernorm", "none"
-mlp_type = "default"          # "default", "column", "row", "full", "patched"
-qk_norm_type = ""          # "" => use norm_type; or "none", "rms", ...
+norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
+mlp_type = "default"            # "default", "column", "row", "full", "patched"
+qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
+pre_attn_norm_type = "rms"      # "" => use norm_type; or "none", "rms", ...
 norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
 
 
@@ -91,7 +93,7 @@ def main():
 
     # wandb logging init
     use_dummy_wandb = run == "dummy" or not master_process
-    wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
+    wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, notes=notes, config=user_config)
 
     # Tokenizer will be useful for evaluation, also we need the vocab size
     tokenizer = get_tokenizer()
@@ -131,6 +133,7 @@ def main():
         mlp_type=mlp_type,
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
+        pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),
     )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)

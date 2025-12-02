@@ -41,8 +41,8 @@ class GPTConfig:
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
-    qk_norm_type: str | None = "rms"  # if None, reuse norm_type
-    pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    qk_norm_type: str  = "rms"
+    pre_attn_norm_type: str = "rms"   # I would also keep this stable, so that our experiment is only changing the mlp norm.
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -70,12 +70,8 @@ class CausalSelfAttention(nn.Module):
         self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
-        qk_norm_type = config.qk_norm_type
-        # QK norm strategy
-        if qk_norm_type is None:
-            qk_norm_type = config.norm_type
         self.qk_norm = build_norm_strategy(
-            NormType(qk_norm_type),
+            NormType(config.qk_norm_type),
             self.head_dim,
             eps=config.norm_eps
         )
@@ -158,11 +154,11 @@ class Block(nn.Module):
 
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
-        # self.pre_attn_norm = build_norm_strategy(
-        #     NormType(config.norm_type),
-        #     config.n_embd,
-        #     eps=config.norm_eps,
-        # )
+        self.pre_attn_norm = build_norm_strategy(
+            NormType(config.pre_attn_norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
         self.pre_mlp_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,
@@ -171,7 +167,7 @@ class Block(nn.Module):
 
 
     def forward(self, x, cos_sin, kv_cache):
-        x = x + self.attn(x, cos_sin, kv_cache)
+        x = x + self.attn(self.pre_attn_norm(x), cos_sin, kv_cache)
         x = x + self.mlp(self.pre_mlp_norm(x))
         return x
 
@@ -306,8 +302,18 @@ class GPT(nn.Module):
         matrix_params = [p for p in block_params if p.ndim == 2]
         rmsnorm_params = [p for p in block_params if p.ndim == 1]
         if rank == 0:
+            print(f"Total block params: {len(block_params)}")
             print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
             print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
+
+            # Print out which optimizer is assigned to each parameter in block 0 for verification
+            for name, param in self.transformer.h[0].named_parameters():
+                if param.ndim == 2:
+                    opt_name = "Muon"
+                else:
+                    opt_name = "AdamW"
+                print(f"Block 0 param: {name}, shape={param.shape}, optimizer={opt_name}")
+
         muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
 
         adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)

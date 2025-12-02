@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_train_baseline
+#SBATCH --job-name=nanochat_column
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=70
+#SBATCH --cpus-per-task=40
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/baseline_%j.out
-#SBATCH --error=logs/baseline_%j.err
+#SBATCH --output=logs/patched_%j.out
+#SBATCH --error=logs/patched_%j.err
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -31,17 +31,17 @@ export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
 NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=baseline-rms               # adjust as you like
+WANDB_RUN=rms-patched               # adjust as you like
 
 # Normalization hyperparameters
-NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                   # epsilon value for normalization layers
-MLP_TYPE=default                # choose from: default, column, row, full, patched
+NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
+NORM_EPS=1e-6                           # epsilon value for normalization layers
+MLP_TYPE=patched                         # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 
-export WANDB_NOTES="Baseline with RMSNorm"
+export WANDB_NOTES="RMSNorm with block MLP fused weights"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='

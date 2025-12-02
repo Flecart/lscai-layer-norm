@@ -30,18 +30,18 @@ export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
 export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
-NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=baseline-rms               # adjust as you like
+NPROC_PER_NODE=4                          # == gpus-per-node
+WANDB_RUN=baseline-layernorm              # adjust as you like
 
 # Normalization hyperparameters
-NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                   # epsilon value for normalization layers
-MLP_TYPE=default                # choose from: default, column, row, full, patched
+NORM_TYPE=layernorm                      # choose from: layernorm, rms, learnable_rms, none
+NORM_EPS=1e-6                            # epsilon value for normalization layers
+MLP_TYPE=default                         # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 
-export WANDB_NOTES="Baseline with RMSNorm"
+export WANDB_NOTES="Baseline with layernorm"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
