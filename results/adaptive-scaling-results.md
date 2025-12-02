@@ -24,7 +24,7 @@ QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 ```
 
-Next we change the norm type to a learnable-rms and compare the two. Surprisingly we notice that learnable-rms makes the training slower.
+Next we change the norm type to a learnable-rms and compare the two. Surprisingly we notice that learnable-rms makes the training converge more slowly.
 
 ```
 NORM_TYPE=learnable-rms
