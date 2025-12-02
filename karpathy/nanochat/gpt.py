@@ -36,9 +36,12 @@ class GPTConfig:
     n_embd: int = 768
 
     norm_type: str = "rms"  # "rms", "layernorm", "none"
-    norm_eps: float = 1e-6  # used e.g. for RMSNorm
-    
+    norm_eps: float = 1e-6  # used e.g. for RMSNorm 
+
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
+
+    embed_norm_type: str = "rms"
+    final_norm_type: str = "rms"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str  = "rms"
@@ -205,15 +208,19 @@ class GPT(nn.Module):
         #     eps=config.norm_eps,
         # )
         self.embed_norm = build_norm_strategy(
-            NormType("rms"),
+            NormType(config.embed_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
         self.final_norm = build_norm_strategy(
-            NormType("rms"),
+            NormType(config.final_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
+
+        # Debug flag to avoid spamming prints every forward
+        self._printed_embed_norm_debug = False
+
 
     def init_weights(self):
         self.apply(self._init_weights)
@@ -344,7 +351,25 @@ class GPT(nn.Module):
 
         # Forward the trunk of the Transformer
         x = self.transformer.wte(idx)
-        x = self.embed_norm(x)
+
+        # --- DEBUG: check embed_norm behavior once on rank 0 ---
+        if not self._printed_embed_norm_debug:
+            ddp, rank, *_ = get_dist_info()
+            if (not ddp) or (rank == 0):
+                print("DEBUG: wte norm before embed_norm:", x.norm().item())
+            x = self.embed_norm(x)
+            if (not ddp) or (rank == 0):
+                print(
+                    "DEBUG: after embed_norm norm:",
+                    x.norm().item(),
+                    "max abs:",
+                    x.abs().max().item(),
+                )
+            self._printed_embed_norm_debug = True
+        else:
+            x = self.embed_norm(x)
+        # --- END DEBUG ---
+
         for block in self.transformer.h:
             x = block(x, cos_sin, kv_cache)
         x = self.final_norm(x)

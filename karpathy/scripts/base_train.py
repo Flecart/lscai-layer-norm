@@ -45,6 +45,10 @@ norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
 mlp_type = "default"            # "default", "column", "row", "full", "patched"
 qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
 pre_attn_norm_type = "rms"      # "" => use norm_type; or "none", "rms", ...
+
+embed_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
+final_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
+
 norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
 
 
@@ -134,6 +138,8 @@ def main():
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
         pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),
+        embed_norm_type=(embed_norm_type if embed_norm_type != "" else None),
+        final_norm_type=(final_norm_type if final_norm_type != "" else None),
     )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)
