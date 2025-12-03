@@ -329,9 +329,10 @@ class GPT(nn.Module):
             dict(params=rmsnorm_params, lr=matrix_lr * dmodel_lr_scale),
         ]
         optimizers = []
+        muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
+        MuonFactory = DistMuon if ddp else Muon
+        muon_optimizer = MuonFactory([], **muon_kwargs)  # default empty
         if self.config.use_muon == "true":
-            muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
-            MuonFactory = DistMuon if ddp else Muon
             
             if rank == 0:
                 print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
@@ -345,7 +346,7 @@ class GPT(nn.Module):
                 adam_groups.append(group)
 
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
-        optimizers.append(adamw_optimizer)
+        optimizers = [adamw_optimizer, muon_optimizer]
 
         for opt in optimizers:
             for group in opt.param_groups:
