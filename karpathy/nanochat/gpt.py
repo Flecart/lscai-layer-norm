@@ -161,7 +161,7 @@ class Block(nn.Module):
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
         self.pre_attn_norm = build_norm_strategy(
-            NormType(config.pre_attn_norm_type),
+            NormType(config.pre_attn_norm),
             config.n_embd,
             eps=config.norm_eps,
         )
