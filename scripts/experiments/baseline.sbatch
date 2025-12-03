@@ -35,6 +35,7 @@ WANDB_RUN=baseline-lrms               # adjust as you like
 
 # Normalization hyperparameters
 NORM_TYPE=learnable_rms                  # choose from: layernorm, rms, learnable_rms, none
+<<<<<<< Updated upstream
 NORM_EPS=1e-6                            # epsilon value for normalization layers
 MLP_TYPE=default                         # choose from: default, column, row, full, patched
 
@@ -42,6 +43,9 @@ QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 
 export WANDB_NOTES="Baseline with learnable RMSNorm"
+=======
+MLP_TYPE=default                  # choose from: default, column, row, full, patched
+>>>>>>> Stashed changes
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -84,9 +88,12 @@ python3 -m torch.distributed.run \
     --run='"$WANDB_RUN"' \
     --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
+<<<<<<< Updated upstream
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
+=======
+>>>>>>> Stashed changes
     --mlp_type='"$MLP_TYPE"'
 '
 

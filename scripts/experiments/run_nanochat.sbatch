@@ -38,7 +38,6 @@ WANDB_RUN=speedrun               # adjust as you like
 # Normalization hyperparameters
 NORM_TYPE=none                  # choose from: layernorm, rms, learnable_rms, none
 QK_NORM_TYPE=none               # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                   # epsilon value for normalization layers
 
 
 echo "[sbatch-master] launching srun/torchrun"
@@ -81,8 +80,7 @@ python3 -m torch.distributed.run \
     --depth=20 \
     --run='"$WANDB_RUN"' \
     --norm_type='"$NORM_TYPE"' \
-    --qk_norm_type='"$QK_NORM_TYPE"' \
-    --norm_eps='"$NORM_EPS"'
+    --qk_norm_type='"$QK_NORM_TYPE"'
 '
 
 srun bash -c "$CMD"

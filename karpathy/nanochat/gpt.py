@@ -36,16 +36,19 @@ class GPTConfig:
     n_embd: int = 768
 
     norm_type: str = "rms"  # "rms", "layernorm", "none"
-    norm_eps: float = 1e-6  # used e.g. for RMSNorm 
-
+    norm_eps: float | None = None  # used e.g. for RMSNorm
+    
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
 
     embed_norm_type: str = "rms"
     final_norm_type: str = "rms"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
-    qk_norm_type: str  = "rms"
-    pre_attn_norm_type: str = "rms"   # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    qk_norm_type: str | None = "rms"  # if None, reuse norm_type
+    pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    
+
+    use_muon: bool = False
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -302,26 +305,21 @@ class GPT(nn.Module):
             print(f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}")
 
         # Create the Muon optimizer for the linear layers
-        muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
-        MuonFactory = DistMuon if ddp else Muon
-        
         block_params = list(block_params)
         matrix_params = [p for p in block_params if p.ndim == 2]
         rmsnorm_params = [p for p in block_params if p.ndim == 1]
         if rank == 0:
             print(f"Total block params: {len(block_params)}")
-            print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
+            print(f"Muon? optimizer will optimize {len(matrix_params)} matrix params")
             print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
 
             # Print out which optimizer is assigned to each parameter in block 0 for verification
             for name, param in self.transformer.h[0].named_parameters():
-                if param.ndim == 2:
+                if param.ndim == 2 and self.config.use_muon:
                     opt_name = "Muon"
                 else:
                     opt_name = "AdamW"
                 print(f"Block 0 param: {name}, shape={param.shape}, optimizer={opt_name}")
-
-        muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
 
         adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
         AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
@@ -330,9 +328,25 @@ class GPT(nn.Module):
             dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
             dict(params=rmsnorm_params, lr=matrix_lr * dmodel_lr_scale),
         ]
+        optimizers = []
+        if self.config.use_muon:
+            muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
+            MuonFactory = DistMuon if ddp else Muon
+            
+            if rank == 0:
+                print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
+                print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
+            muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
+            optimizers.append(muon_optimizer)
+        else:
+            # see muon init, copying that part here.
+            for size in {p.numel() for p in matrix_params}:
+                group = dict(params=[p for p in matrix_params if p.numel() == size])
+                adam_groups.append(group)
+
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
-        # Combine them the two optimizers into one list
-        optimizers = [adamw_optimizer, muon_optimizer]
+        optimizers.append(adamw_optimizer)
+
         for opt in optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]

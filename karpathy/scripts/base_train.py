@@ -41,6 +41,7 @@ max_seq_len = 2048 # max context length
 
 
 # Normalization
+<<<<<<< Updated upstream
 norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
 mlp_type = "default"            # "default", "column", "row", "full", "patched"
 qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
@@ -50,7 +51,14 @@ embed_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
 final_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
 
 norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
+=======
+norm_type = "rms"          # "rms", "learnable_rms", "layernorm", "none"
+mlp_type = "default"          # "default", "column", "row", "full", "patched"
+qk_norm_type = ""          # "" => use norm_type; or "none", "rms", ...
+norm_eps = None            # eps for RMSNorm / learnable RMS
+>>>>>>> Stashed changes
 
+use_muon = False
 
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)
