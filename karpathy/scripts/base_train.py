@@ -51,7 +51,7 @@ final_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
 
 norm_eps = None            # eps for RMSNorm / learnable RMS
 
-use_muon = False
+use_muon = "false"              # whether to use Muon optimizer for linear layers
 
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)

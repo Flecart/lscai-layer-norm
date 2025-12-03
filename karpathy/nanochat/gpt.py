@@ -48,7 +48,7 @@ class GPTConfig:
     pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
     
 
-    use_muon: bool = False
+    use_muon: str = "false"
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -315,7 +315,7 @@ class GPT(nn.Module):
 
             # Print out which optimizer is assigned to each parameter in block 0 for verification
             for name, param in self.transformer.h[0].named_parameters():
-                if param.ndim == 2 and self.config.use_muon:
+                if param.ndim == 2 and self.config.use_muon == "true":
                     opt_name = "Muon"
                 else:
                     opt_name = "AdamW"
@@ -329,7 +329,7 @@ class GPT(nn.Module):
             dict(params=rmsnorm_params, lr=matrix_lr * dmodel_lr_scale),
         ]
         optimizers = []
-        if self.config.use_muon:
+        if self.config.use_muon == "true":
             muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
             MuonFactory = DistMuon if ddp else Muon
             
