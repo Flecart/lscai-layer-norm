@@ -40,6 +40,7 @@ MLP_TYPE=column                         # choose from: default, column, row, ful
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
+USE_MUON=false
 
 export WANDB_NOTES="RMSNorm with column MLP fused weights"
 
@@ -87,7 +88,8 @@ python3 -m torch.distributed.run \
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-    --mlp_type='"$MLP_TYPE"'
+    --mlp_type='"$MLP_TYPE"' \
+    --use_muon='"$USE_MUON"'
 '
 
 srun bash -c "$CMD"

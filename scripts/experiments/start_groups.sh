@@ -6,4 +6,3 @@ sbatch scripts/experiments/rms_column.sbatch
 sbatch scripts/experiments/rms_full.sbatch
 sbatch scripts/experiments/rms_row.sbatch
 sbatch scripts/experiments/baseline.sbatch
-sbatch scripts/experiments/baseline_no_learnable_norm.sbatch

@@ -42,6 +42,7 @@ FINAL_NORM_TYPE=torus
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
+USE_MUON=false
 
 export WANDB_NOTES="RMSNorm with column MLP fused weights"
 
@@ -91,7 +92,8 @@ python3 -m torch.distributed.run \
     --embed_norm_type='"$EMBED_NORM_TYPE"' \
     --final_norm_type='"$FINAL_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-    --mlp_type='"$MLP_TYPE"'
+    --mlp_type='"$MLP_TYPE"' \
+    --use_muon='"$USE_MUON"'
 '
 
 srun bash -c "$CMD"
