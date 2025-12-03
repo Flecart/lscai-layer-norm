@@ -331,7 +331,6 @@ class GPT(nn.Module):
         optimizers = []
         muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
         MuonFactory = DistMuon if ddp else Muon
-        muon_optimizer = MuonFactory([], **muon_kwargs)  # default empty
         if self.config.use_muon == "true":
             
             if rank == 0:
@@ -346,8 +345,8 @@ class GPT(nn.Module):
                 adam_groups.append(group)
 
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
-        optimizers = [adamw_optimizer, muon_optimizer]
-
+        optimizers.append(adamw_optimizer)
+        
         for opt in optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]

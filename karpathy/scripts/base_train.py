@@ -177,7 +177,8 @@ def main():
     # -----------------------------------------------------------------------------
     # Initialize the Optimizer (Muon for Linear layers, AdamW for embedding and lm_head)
     optimizers = model.setup_optimizers(unembedding_lr=unembedding_lr, embedding_lr=embedding_lr, matrix_lr=matrix_lr, weight_decay=weight_decay)
-    adamw_optimizer, muon_optimizer = optimizers
+    if use_muon == "true":
+        adamw_optimizer, muon_optimizer = optimizers
 
     # Initialize the DataLoaders for train/val
     base_dir = get_base_dir()
@@ -317,9 +318,11 @@ def main():
         for opt in optimizers:
             for group in opt.param_groups:
                 group["lr"] = group["initial_lr"] * lrm
-        muon_momentum = get_muon_momentum(step)
-        for group in muon_optimizer.param_groups:
-            group["momentum"] = muon_momentum
+        
+        if use_muon == "true":
+            muon_momentum = get_muon_momentum(step)
+            for group in muon_optimizer.param_groups:
+                group["momentum"] = muon_momentum
         for opt in optimizers:
             opt.step()
         model.zero_grad(set_to_none=True)
