@@ -45,7 +45,7 @@ class GPTConfig:
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str | None = "rms"  # if None, reuse norm_type
-    pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    pre_attn_norm_type: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
     
 
     use_muon: str = "false"
@@ -161,7 +161,7 @@ class Block(nn.Module):
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
         self.pre_attn_norm = build_norm_strategy(
-            NormType(config.pre_attn_norm),
+            NormType(config.pre_attn_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
