@@ -44,3 +44,25 @@ sbatch run_nanochat.sbatch
 
 ### Logs
 All logs are inside `/logs`
+
+
+
+
+## Nematus
+run the bootstrap script:
+
+```bash
+cd nematus
+./scripts/bootstrap_nematus.sh
+```
+
+this might take around 30 minutes.
+
+
+from `nematus/`, train the model with:
+
+```bash
+sbatch scripts/experiments/run_nematus.sbatch
+```
+
+all logs are inside `nematus/logs`.
