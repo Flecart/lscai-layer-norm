@@ -1,0 +1,14 @@
+*.pyc
+build
+dist
+nmt.egg-info
+downloads
+
+model/truecase-model.*
+model/ende.bpe
+
+data/corpus.*
+data/newstest*.*
+data/vocab.*
+
+nematus.egg-info/
