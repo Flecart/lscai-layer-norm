@@ -2,7 +2,7 @@
   "adam_beta1": 0.9,
   "adam_beta2": 0.999,
   "adam_epsilon": 1e-08,
-  "batch_size": 80,
+  "batch_size": 128,
   "beam_freq": 10000,
   "beam_size": 12,
   "clip_c": 1.0,
@@ -18,7 +18,7 @@
   "dim_per_factor": [
     512
   ],
-  "disp_freq": 1000,
+  "disp_freq": 100,
   "embedding_size": 512,
   "exponential_smoothing": 0.0,
   "factors": 1,
@@ -105,7 +105,7 @@
   "transformer_num_heads": 8,
   "translation_maxlen": 200,
   "translation_strategy": "beam_search",
-  "valid_batch_size": 80,
+  "valid_batch_size": 128,
   "valid_bleu_source_dataset": "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.en",
   "valid_datasets": [
     "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.en",

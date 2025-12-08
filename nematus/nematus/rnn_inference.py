@@ -61,7 +61,7 @@ class ModelAdapter:
             """
             with tf.compat.v1.name_scope(self._scope):
 
-                shapes = { step_target_ids: ('batch_size',) }
+                shapes = [(step_target_ids, ('batch_size',))]
                 tf_utils.assert_shapes(shapes)
 
                 logits, memories['base_states'], memories['high_states'] = \
@@ -127,7 +127,7 @@ class ModelAdapter:
         with tf.compat.v1.name_scope(self._scope):
             d = self._model.decoder
 
-            shapes = { d.init_state: ('batch_size', self.config.state_size) }
+            shapes = [(d.init_state, ('batch_size', self._config.state_size))]
             tf_utils.assert_shapes(shapes)
 
             high_depth = 0 if d.high_gru_stack is None \
@@ -176,14 +176,14 @@ class ModelAdapter:
         """
         with tf.compat.v1.name_scope(self._scope):
 
-            shapes = { gather_coordinates: ('batch_size_x', 'beam_size', 2) }
+            shapes = [(gather_coordinates, ('batch_size_x', 'beam_size', 2))]
             tf_utils.assert_shapes(shapes)
 
             coords_shape = tf.shape(input=gather_coordinates)
             batch_size_x, beam_size = coords_shape[0], coords_shape[1]
 
             def gather_states(states):
-                shapes = { states: ('batch_size', self._config.state_size) }
+                shapes = [(states, ('batch_size', self._config.state_size))]
                 tf_utils.assert_shapes(shapes)
                 states_shape = tf.shape(input=states)
                 state_size = states_shape[1]
