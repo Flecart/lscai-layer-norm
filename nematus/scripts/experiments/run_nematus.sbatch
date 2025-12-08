@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --time=10:00:00
-#SBATCH --environment=ngc_tf1_jan
+#SBATCH --environment=ngc_tf2_jan
 #SBATCH --container-writable
 #SBATCH --output=logs/nematus_wmt17_%j.out
 #SBATCH --error=logs/nematus_wmt17_%j.err
@@ -57,6 +57,9 @@ srun bash -lc '
   echo "[nematus-sbatch] src=$src trg=$trg"
   echo "[nematus-sbatch] CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 
+  # force 1 gpu
+  export CUDA_VISIBLE_DEVICES=0
+
   # This is literally what their train.sh does:
   CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES python "$nematus_home/nematus/train.py" \
       --model "$working_dir/model" \
@@ -67,13 +70,11 @@ srun bash -lc '
       --reload latest_checkpoint \
       --dim_word 512 \
       --dim 1024 \
-      --lrate 0.0005 \
+      --lrate 0.0001 \
       --optimizer adam \
       --maxlen 50 \
-      --batch_size 128 \
-      --valid_batch_size 128 \
-      --token_batch_size 100000 \
-      --valid_token_batch_size 60000 \
+      --batch_size 80 \
+      --valid_batch_size 80 \
       --validFreq 10000 \
       --dispFreq 1000 \
       --saveFreq 30000 \

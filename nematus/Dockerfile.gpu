@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/tensorflow:22.12-tf1-py3
+FROM nvcr.io/nvidia/tensorflow:24.02-tf2-py3
 
 # Basic utilities and Nematus deps
 RUN apt-get update && apt-get install -y \

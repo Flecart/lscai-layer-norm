@@ -2,7 +2,7 @@
   "adam_beta1": 0.9,
   "adam_beta2": 0.999,
   "adam_epsilon": 1e-08,
-  "batch_size": 128,
+  "batch_size": 80,
   "beam_freq": 10000,
   "beam_size": 12,
   "clip_c": 1.0,
@@ -26,7 +26,7 @@
   "gradient_aggregation_steps": 1,
   "keep_train_set_in_memory": false,
   "label_smoothing": 0.0,
-  "learning_rate": 0.0005,
+  "learning_rate": 0.0001,
   "learning_schedule": "constant",
   "loss_function": "cross-entropy",
   "map_decay_c": 0.0,
@@ -94,7 +94,7 @@
   "theano_compat": false,
   "tie_decoder_embeddings": true,
   "tie_encoder_decoder_embeddings": false,
-  "token_batch_size": 100000,
+  "token_batch_size": 0,
   "transformer_dec_depth": 6,
   "transformer_dropout_attn": 0.1,
   "transformer_dropout_embeddings": 0.1,
@@ -105,7 +105,7 @@
   "transformer_num_heads": 8,
   "translation_maxlen": 200,
   "translation_strategy": "beam_search",
-  "valid_batch_size": 128,
+  "valid_batch_size": 80,
   "valid_bleu_source_dataset": "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.en",
   "valid_datasets": [
     "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.en",
@@ -115,6 +115,6 @@
   "valid_script": "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/validate.sh",
   "valid_source_dataset": "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.en",
   "valid_target_dataset": "/users/dzafferani/scratch/lscai-layer-norm/nematus/scripts/wmt17/../../data/newstest2013.bpe.de",
-  "valid_token_batch_size": 60000,
+  "valid_token_batch_size": 0,
   "warmup_steps": 8000
 }

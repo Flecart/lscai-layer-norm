@@ -8,7 +8,7 @@ set -euo pipefail
 PROJECT_DIR="$HOME/scratch/lscai-layer-norm/nematus"
 SCRIPT_DIR="$PROJECT_DIR/scripts"
 WMT17_DIR="$SCRIPT_DIR/wmt17"          # expects download_files.sh / preprocess.sh here
-EDF_ENV_NAME="ngc_tf1_jan"
+EDF_ENV_NAME="ngc_tf2_jan"
 
 echo "[bootstrap-nematus] Starting Nematus/WMT17 bootstrap..."
 echo "[bootstrap-nematus] Project dir: $PROJECT_DIR"

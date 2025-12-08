@@ -3,7 +3,7 @@ set -euo pipefail
 
 EDF_DIR="$HOME/.edf"
 
-ENVFILE="$EDF_DIR/ngc_tf1_jan.toml"
+ENVFILE="$EDF_DIR/ngc_tf2_jan.toml"
 
 mkdir -p "$EDF_DIR"
 
@@ -11,7 +11,7 @@ mkdir -p "$EDF_DIR"
 [ -f "$ENVFILE" ] && rm "$ENVFILE"
 
 cat > "$ENVFILE" << EOF
-image = "/users/$USER/scratch/nematus_tf1.sqsh"
+image = "/users/$USER/scratch/nematus_tf2.sqsh"
 
 mounts = [
   "/capstor",
