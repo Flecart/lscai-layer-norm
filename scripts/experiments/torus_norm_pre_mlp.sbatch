@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_row
+#SBATCH --job-name=nanochat_torus_norm_pre_mlp
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,8 +9,8 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/row_%j.out
-#SBATCH --error=logs/row_%j.err
+#SBATCH --output=logs/torus_norm_pre_mlp_%j.out
+#SBATCH --error=logs/torus_norm_pre_mlp_%j.err
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -30,19 +30,21 @@ export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
 export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
-NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=rms-row               # adjust as you like
+NPROC_PER_NODE=4                           # == gpus-per-node
+WANDB_RUN=torus-norm-pre-mlp               # adjust as you like
 
 # Normalization hyperparameters
-NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                           # epsilon value for normalization layers
-MLP_TYPE=row                            # choose from: default, column, row, full, patched
+NORM_TYPE=torus                          # choose from: layernorm, rms, learnable_rms, none, torus
+NORM_EPS=1e-6                            # epsilon value for normalization layers
+MLP_TYPE=default                         # choose from: default, column, row, full, patched
+EMBED_NORM_TYPE=torus
+FINAL_NORM_TYPE=torus
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 USE_MUON=false
 
-export WANDB_NOTES="RMSNorm with row MLP fused weights"
+export WANDB_NOTES="RMSNorm with column MLP fused weights"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -87,6 +89,8 @@ python3 -m torch.distributed.run \
     --norm_type='"$NORM_TYPE"' \
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
+    --embed_norm_type='"$EMBED_NORM_TYPE"' \
+    --final_norm_type='"$FINAL_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
     --mlp_type='"$MLP_TYPE"' \
     --use_muon='"$USE_MUON"'

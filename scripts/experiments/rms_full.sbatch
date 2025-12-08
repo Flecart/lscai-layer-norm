@@ -34,9 +34,15 @@ NPROC_PER_NODE=4                 # == gpus-per-node
 WANDB_RUN=rms-full               # adjust as you like
 
 # Normalization hyperparameters
-NORM_TYPE=rms                  # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                   # epsilon value for normalization layers
-MLP_TYPE=full                  # choose from: default, column, row, full, patched
+NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
+NORM_EPS=1e-6                           # epsilon value for normalization layers
+MLP_TYPE=full                           # choose from: default, column, row, full, patched
+
+QK_NORM_TYPE=rms
+PRE_ATTN_NORM_TYPE=rms
+USE_MUON=false
+
+export WANDB_NOTES="RMSNorm with full MLP fused weights"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -77,9 +83,13 @@ python3 -m torch.distributed.run \
   -m scripts.base_train -- \
     --depth=20 \
     --run='"$WANDB_RUN"' \
+    --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
+    --qk_norm_type='"$QK_NORM_TYPE"' \
+    --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-    --mlp_type='"$MLP_TYPE"'
+    --mlp_type='"$MLP_TYPE"' \
+    --use_muon='"$USE_MUON"'
 '
 
 srun bash -c "$CMD"

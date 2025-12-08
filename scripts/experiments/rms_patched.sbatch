@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_row
+#SBATCH --job-name=nanochat_column
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,8 +9,8 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/row_%j.out
-#SBATCH --error=logs/row_%j.err
+#SBATCH --output=logs/patched_%j.out
+#SBATCH --error=logs/patched_%j.err
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -31,18 +31,18 @@ export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
 NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=rms-row               # adjust as you like
+WANDB_RUN=rms-patched               # adjust as you like
 
 # Normalization hyperparameters
 NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                           # epsilon value for normalization layers
-MLP_TYPE=row                            # choose from: default, column, row, full, patched
+MLP_TYPE=patched                         # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 USE_MUON=false
 
-export WANDB_NOTES="RMSNorm with row MLP fused weights"
+export WANDB_NOTES="RMSNorm with block MLP fused weights"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='

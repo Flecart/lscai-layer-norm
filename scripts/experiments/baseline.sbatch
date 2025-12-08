@@ -30,13 +30,19 @@ export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
 export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
-NPROC_PER_NODE=4                 # == gpus-per-node
+NPROC_PER_NODE=4                      # == gpus-per-node
 WANDB_RUN=baseline-lrms               # adjust as you like
 
 # Normalization hyperparameters
 NORM_TYPE=learnable_rms                  # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                   # epsilon value for normalization layers
-MLP_TYPE=default                  # choose from: default, column, row, full, patched
+NORM_EPS=1e-6                            # epsilon value for normalization layers
+MLP_TYPE=default                         # choose from: default, column, row, full, patched
+
+QK_NORM_TYPE=rms
+PRE_ATTN_NORM_TYPE=rms
+USE_MUON=false
+
+export WANDB_NOTES="Baseline with learnable RMSNorm"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -77,9 +83,13 @@ python3 -m torch.distributed.run \
   -m scripts.base_train -- \
     --depth=20 \
     --run='"$WANDB_RUN"' \
+    --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
+    --qk_norm_type='"$QK_NORM_TYPE"' \
+    --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-    --mlp_type='"$MLP_TYPE"'
+    --mlp_type='"$MLP_TYPE"' \
+    --use_muon='"$USE_MUON"'
 '
 
 srun bash -c "$CMD"

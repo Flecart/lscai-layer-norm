@@ -36,13 +36,19 @@ class GPTConfig:
     n_embd: int = 768
 
     norm_type: str = "rms"  # "rms", "layernorm", "none"
-    norm_eps: float = 1e-6  # used e.g. for RMSNorm
+    norm_eps: float | None = None  # used e.g. for RMSNorm
     
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
+
+    embed_norm_type: str = "rms"
+    final_norm_type: str = "rms"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str | None = "rms"  # if None, reuse norm_type
-    pre_attn_norm: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    pre_attn_norm_type: str = "rms" # I would also keep this stable, so that our experiment is only changing the mlp norm.
+    
+
+    use_muon: str = "false"
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -70,12 +76,8 @@ class CausalSelfAttention(nn.Module):
         self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
-        qk_norm_type = config.qk_norm_type
-        # QK norm strategy
-        if qk_norm_type is None:
-            qk_norm_type = config.norm_type
         self.qk_norm = build_norm_strategy(
-            NormType(qk_norm_type),
+            NormType(config.qk_norm_type),
             self.head_dim,
             eps=config.norm_eps
         )
@@ -158,11 +160,11 @@ class Block(nn.Module):
 
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
-        # self.pre_attn_norm = build_norm_strategy(
-        #     NormType(config.norm_type),
-        #     config.n_embd,
-        #     eps=config.norm_eps,
-        # )
+        self.pre_attn_norm = build_norm_strategy(
+            NormType(config.pre_attn_norm_type),
+            config.n_embd,
+            eps=config.norm_eps,
+        )
         self.pre_mlp_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,
@@ -171,7 +173,7 @@ class Block(nn.Module):
 
 
     def forward(self, x, cos_sin, kv_cache):
-        x = x + self.attn(x, cos_sin, kv_cache)
+        x = x + self.attn(self.pre_attn_norm(x), cos_sin, kv_cache)
         x = x + self.mlp(self.pre_mlp_norm(x))
         return x
 
@@ -209,15 +211,19 @@ class GPT(nn.Module):
         #     eps=config.norm_eps,
         # )
         self.embed_norm = build_norm_strategy(
-            NormType("rms"),
+            NormType(config.embed_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
         self.final_norm = build_norm_strategy(
-            NormType("rms"),
+            NormType(config.final_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
+
+        # Debug flag to avoid spamming prints every forward
+        self._printed_embed_norm_debug = False
+
 
     def init_weights(self):
         self.apply(self._init_weights)
@@ -299,16 +305,21 @@ class GPT(nn.Module):
             print(f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}")
 
         # Create the Muon optimizer for the linear layers
-        muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
-        MuonFactory = DistMuon if ddp else Muon
-        
         block_params = list(block_params)
         matrix_params = [p for p in block_params if p.ndim == 2]
         rmsnorm_params = [p for p in block_params if p.ndim == 1]
         if rank == 0:
-            print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
+            print(f"Total block params: {len(block_params)}")
+            print(f"Muon? optimizer will optimize {len(matrix_params)} matrix params")
             print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
-        muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
+
+            # Print out which optimizer is assigned to each parameter in block 0 for verification
+            for name, param in self.transformer.h[0].named_parameters():
+                if param.ndim == 2 and self.config.use_muon == "true":
+                    opt_name = "Muon"
+                else:
+                    opt_name = "AdamW"
+                print(f"Block 0 param: {name}, shape={param.shape}, optimizer={opt_name}")
 
         adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
         AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
@@ -317,9 +328,25 @@ class GPT(nn.Module):
             dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
             dict(params=rmsnorm_params, lr=matrix_lr * dmodel_lr_scale),
         ]
+        optimizers = []
+        muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
+        MuonFactory = DistMuon if ddp else Muon
+        if self.config.use_muon == "true":
+            
+            if rank == 0:
+                print(f"Muon optimizer will optimize {len(matrix_params)} matrix params")
+                print(f"AdamW optimizer will optimize {len(rmsnorm_params)} RMSNorm params")
+            muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
+            optimizers.append(muon_optimizer)
+        else:
+            # see muon init, copying that part here.
+            for size in {p.numel() for p in matrix_params}:
+                group = dict(params=[p for p in matrix_params if p.numel() == size])
+                adam_groups.append(group)
+
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
-        # Combine them the two optimizers into one list
-        optimizers = [adamw_optimizer, muon_optimizer]
+        optimizers.append(adamw_optimizer)
+        
         for opt in optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
@@ -338,7 +365,25 @@ class GPT(nn.Module):
 
         # Forward the trunk of the Transformer
         x = self.transformer.wte(idx)
-        x = self.embed_norm(x)
+
+        # --- DEBUG: check embed_norm behavior once on rank 0 ---
+        if not self._printed_embed_norm_debug:
+            ddp, rank, *_ = get_dist_info()
+            if (not ddp) or (rank == 0):
+                print("DEBUG: wte norm before embed_norm:", x.norm().item())
+            x = self.embed_norm(x)
+            if (not ddp) or (rank == 0):
+                print(
+                    "DEBUG: after embed_norm norm:",
+                    x.norm().item(),
+                    "max abs:",
+                    x.abs().max().item(),
+                )
+            self._printed_embed_norm_debug = True
+        else:
+            x = self.embed_norm(x)
+        # --- END DEBUG ---
+
         for block in self.transformer.h:
             x = block(x, cos_sin, kv_cache)
         x = self.final_norm(x)

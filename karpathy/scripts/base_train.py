@@ -32,6 +32,7 @@ import wandb
 # -----------------------------------------------------------------------------
 # User settings
 run = "dummy" # wandb run name default ("dummy" is special - we won't log to wandb)
+notes = "" # optional notes for wandb run
 # Runtime
 device_type = "" # cuda|cpu|mps (empty => autodetect good device type default, in order: CUDA > MPS > CPU)
 # Model architecture
@@ -40,11 +41,17 @@ max_seq_len = 2048 # max context length
 
 
 # Normalization
-norm_type = "rms"          # "rms", "learnable_rms", "layernorm", "none"
-mlp_type = "default"          # "default", "column", "row", "full", "patched"
-qk_norm_type = ""          # "" => use norm_type; or "none", "rms", ...
-norm_eps = 1e-6            # eps for RMSNorm / learnable RMS
+norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
+mlp_type = "default"            # "default", "column", "row", "full", "patched"
+qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
+pre_attn_norm_type = "rms"      # "" => use norm_type; or "none", "rms", ...
 
+embed_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
+final_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
+
+norm_eps = None            # eps for RMSNorm / learnable RMS
+
+use_muon = "false"              # whether to use Muon optimizer for linear layers
 
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)
@@ -91,7 +98,7 @@ def main():
 
     # wandb logging init
     use_dummy_wandb = run == "dummy" or not master_process
-    wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
+    wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, notes=notes, config=user_config)
 
     # Tokenizer will be useful for evaluation, also we need the vocab size
     tokenizer = get_tokenizer()
@@ -131,6 +138,9 @@ def main():
         mlp_type=mlp_type,
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
+        pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),
+        embed_norm_type=(embed_norm_type if embed_norm_type != "" else None),
+        final_norm_type=(final_norm_type if final_norm_type != "" else None),
     )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)
@@ -167,7 +177,8 @@ def main():
     # -----------------------------------------------------------------------------
     # Initialize the Optimizer (Muon for Linear layers, AdamW for embedding and lm_head)
     optimizers = model.setup_optimizers(unembedding_lr=unembedding_lr, embedding_lr=embedding_lr, matrix_lr=matrix_lr, weight_decay=weight_decay)
-    adamw_optimizer, muon_optimizer = optimizers
+    if use_muon == "true":
+        adamw_optimizer, muon_optimizer = optimizers
 
     # Initialize the DataLoaders for train/val
     base_dir = get_base_dir()
@@ -307,9 +318,11 @@ def main():
         for opt in optimizers:
             for group in opt.param_groups:
                 group["lr"] = group["initial_lr"] * lrm
-        muon_momentum = get_muon_momentum(step)
-        for group in muon_optimizer.param_groups:
-            group["momentum"] = muon_momentum
+        
+        if use_muon == "true":
+            muon_momentum = get_muon_momentum(step)
+            for group in muon_optimizer.param_groups:
+                group["momentum"] = muon_momentum
         for opt in optimizers:
             opt.step()
         model.zero_grad(set_to_none=True)

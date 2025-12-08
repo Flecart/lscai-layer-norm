@@ -16,7 +16,6 @@ export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export OMP_NUM_THREADS=1
 
-
 set -eo pipefail
 
 echo "[sbatch-master] running on $(hostname)"
@@ -34,9 +33,19 @@ NPROC_PER_NODE=4                 # == gpus-per-node
 WANDB_RUN=baseline-rms               # adjust as you like
 
 # Normalization hyperparameters
-NORM_TYPE=rms                  # choose from: layernorm, rms, learnable_rms, none
+<<<<<<< Updated upstream
+NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                   # epsilon value for normalization layers
+MLP_TYPE=default                # choose from: default, column, row, full, patched
+
+QK_NORM_TYPE=rms
+PRE_ATTN_NORM_TYPE=rms
+
+export WANDB_NOTES="Baseline with RMSNorm"
+=======
+NORM_TYPE=rms                  # choose from: layernorm, rms, learnable_rms, none
 MLP_TYPE=default                  # choose from: default, column, row, full, patched
+>>>>>>> Stashed changes
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -77,8 +86,14 @@ python3 -m torch.distributed.run \
   -m scripts.base_train -- \
     --depth=20 \
     --run='"$WANDB_RUN"' \
+    --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
+<<<<<<< Updated upstream
+    --qk_norm_type='"$QK_NORM_TYPE"' \
+    --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
+=======
+>>>>>>> Stashed changes
     --mlp_type='"$MLP_TYPE"'
 '
 
