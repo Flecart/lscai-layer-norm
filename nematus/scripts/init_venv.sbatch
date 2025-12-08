@@ -14,7 +14,16 @@ set -euo pipefail
 
 echo "[init_venv_nematus.sbatch] running on $(hostname)"
 
-cd "$HOME/scratch/lscai-layer-norm/nematus"
+PROJECT_DIR="$HOME/scratch/lscai-layer-norm/nematus"
+SCRIPT_PATH="$PROJECT_DIR/scripts/init_venv_nematus.sh"
 
-# run the .init_venv.sh script inside the sbatch job
-srun --ntasks=1 --environment=ngc_tf1_jan bash scripts/init_venv_nematus.sh
+echo "[init_venv_nematus.sbatch] PROJECT_DIR:  $PROJECT_DIR"
+echo "[init_venv_nematus.sbatch] SCRIPT_PATH:  $SCRIPT_PATH"
+
+# Just to be sure:
+ls -l "$SCRIPT_PATH" || { echo "Script not found on host"; exit 1; }
+
+srun \
+  --ntasks=1 \
+  --environment=ngc_tf2_jan \
+  bash "$SCRIPT_PATH"

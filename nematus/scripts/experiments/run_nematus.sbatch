@@ -55,10 +55,12 @@ srun bash -lc '
 
   echo "[nematus-sbatch] nematus_home: $nematus_home"
   echo "[nematus-sbatch] src=$src trg=$trg"
-  echo "[nematus-sbatch] CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 
   # force 1 gpu
   export CUDA_VISIBLE_DEVICES=0
+
+  echo "[nematus-sbatch] CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+
 
   # This is literally what their train.sh does:
   CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES python "$nematus_home/nematus/train.py" \
@@ -73,10 +75,10 @@ srun bash -lc '
       --lrate 0.0001 \
       --optimizer adam \
       --maxlen 50 \
-      --batch_size 80 \
-      --valid_batch_size 80 \
+      --batch_size 128 \
+      --valid_batch_size 128 \
       --validFreq 10000 \
-      --dispFreq 1000 \
+      --dispFreq 100 \
       --saveFreq 30000 \
       --sampleFreq 10000 \
       --tie_decoder_embeddings \

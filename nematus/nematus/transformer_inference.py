@@ -165,7 +165,7 @@ class ModelAdapter:
         """
         with tf.compat.v1.name_scope(self._scope):
 
-            shapes = { gather_coordinates: ('batch_size_x', 'beam_size', 2) }
+            shapes = [(gather_coordinates, ('batch_size_x', 'beam_size', 2))]
             tf_utils.assert_shapes(shapes)
 
             coords_shape = tf.shape(input=gather_coordinates)
@@ -173,7 +173,7 @@ class ModelAdapter:
 
             def gather_attn(attn):
                 # TODO Specify second and third?
-                shapes = { attn: ('batch_size', None, None) }
+                shapes = [(attn, ('batch_size', None, None))]
                 tf_utils.assert_shapes(shapes)
                 attn_dims = tf_utils.get_shape_list(attn)
                 new_shape = [beam_size, batch_size_x] + attn_dims[1:]
