@@ -14,7 +14,7 @@ import tempfile
 import time
 
 # Start logging.
-level = logging.INFO
+level = logging.DEBUG
 logging.basicConfig(level=level, format='%(levelname)s: %(message)s')
 
 import numpy
@@ -124,6 +124,7 @@ def train(config, sess):
     logging.info('Building model...')
     replicas = []
     for i in range(num_replicas):
+        logging.info("Building replica %d", i)
         device_type = "GPU" if num_gpus > 0 else "CPU"
         device_spec = tf.DeviceSpec(device_type=device_type, device_index=i)
         with tf.device(device_spec):
@@ -133,6 +134,8 @@ def train(config, sess):
                 else:
                     model = rnn_model.RNNModel(config)
                 replicas.append(model)
+
+    logging.info("Done building replicas")
 
     init = tf.zeros_initializer()
     global_step = tf.compat.v1.get_variable('time', [], initializer=init, trainable=False)
@@ -177,8 +180,13 @@ def train(config, sess):
     if config.exponential_smoothing > 0.0:
         smoothing = ExponentialSmoothing(config.exponential_smoothing)
 
+
+    logging.info("Initializing / restoring variables")
+
     saver, progress = model_loader.init_or_restore_variables(
         config, sess, train=True)
+    
+    logging.info("Done init_or_restore, uidx=%s", progress.uidx)
 
     global_step.assign(progress.uidx, sess)
 
@@ -197,7 +205,10 @@ def train(config, sess):
     #save model options
     write_config_to_json_file(config, config.saveto)
 
+    logging.info("Loading data iterators")
     text_iterator, valid_text_iterator = load_data(config)
+    logging.info("Done loading data, starting epochs")
+
     _, _, num_to_source, num_to_target = util.load_dictionaries(config)
     total_loss = 0.
     n_sents, n_words = 0, 0
@@ -209,6 +220,7 @@ def train(config, sess):
     for progress.eidx in range(progress.eidx, config.max_epochs):
         logging.info('Starting epoch {0}'.format(progress.eidx))
         for source_sents, target_sents in text_iterator:
+            logging.debug("Got batch with %d sentences", len(target_sents))
             if len(source_sents[0][0]) != config.factors:
                 logging.error('Mismatch between number of factors in settings ({0}), and number in training corpus ({1})\n'.format(config.factors, len(source_sents[0][0])))
                 sys.exit(1)
