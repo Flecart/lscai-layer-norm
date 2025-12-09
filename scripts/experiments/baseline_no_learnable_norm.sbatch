@@ -33,7 +33,6 @@ NPROC_PER_NODE=4                 # == gpus-per-node
 WANDB_RUN=baseline-rms               # adjust as you like
 
 # Normalization hyperparameters
-<<<<<<< Updated upstream
 NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                   # epsilon value for normalization layers
 MLP_TYPE=default                # choose from: default, column, row, full, patched
@@ -42,10 +41,6 @@ QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 
 export WANDB_NOTES="Baseline with RMSNorm"
-=======
-NORM_TYPE=rms                  # choose from: layernorm, rms, learnable_rms, none
-MLP_TYPE=default                  # choose from: default, column, row, full, patched
->>>>>>> Stashed changes
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
