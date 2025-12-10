@@ -28,6 +28,37 @@ from nanochat.engine import Engine
 from scripts.base_eval import evaluate_model
 from torch.distributed.elastic.multiprocessing.errors import record
 import wandb
+import random
+import numpy as np
+
+def seed_everything(seed: int = 42):
+    
+    # 1. Set the seed for Python's built-in random module
+    random.seed(seed)
+    
+    # 2. Set the seed for NumPy (crucial for data augmentation/transforms)
+    np.random.seed(seed)
+    
+    # 3. Set the seed for PyTorch (CPU)
+    torch.manual_seed(seed)
+    
+    # 4. Set the seed for PyTorch (GPU/CUDA)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # Essential if using multiple GPUs
+    
+    # 5. Determine how hash values are calculated (for sets/dictionaries)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    
+    # 6. Configure CuDNN (The "Black Box" part)
+    # Prevents CuDNN from choosing the "fastest" convolution algorithm, 
+    # which can vary between runs.
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"Global seed set to {seed}")
+
+# Call it immediately
+seed_everything(42)
 
 # -----------------------------------------------------------------------------
 # User settings

@@ -42,7 +42,7 @@ QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
 USE_MUON=false
 
-export WANDB_NOTES="RMSNorm with column MLP fused weights"
+export WANDB_NOTES="RMSNorm with column MLP fused weights seed"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='

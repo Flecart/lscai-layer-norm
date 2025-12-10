@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 from nanochat.common import get_dist_info, print0
 from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
@@ -74,9 +75,38 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = self.n_embd // self.n_head
         assert self.n_embd % self.n_head == 0
         assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
-        self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
-        self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
-        self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        
+        if config.mlp_type != "default":
+            assert self.n_head == self.n_kv_head, "When using fused MLP strategies, please set n_head == n_kv_head for simplicity."
+        
+        # self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+        self.c_q = build_mlp_strategy(
+            config.mlp_type,
+            self.n_embd,
+            self.n_head * self.head_dim,
+            bias=False
+        )
+        # self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_k = build_mlp_strategy(
+            config.mlp_type,
+            self.n_embd,
+            self.n_kv_head * self.head_dim,
+            bias=False
+        )
+        # self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_v = build_mlp_strategy(
+            config.mlp_type,
+            self.n_embd,
+            self.n_kv_head * self.head_dim,
+            bias=False
+        )
+        
+        # tie weights for q,k,v projections if column_parameter is present
+        # this should make it identical to using nn.Linear and lrms
+        if hasattr(self.c_q, "column_parameters") and hasattr(self.c_k, "column_parameters") and hasattr(self.c_v, "column_parameters"):
+            self.c_k.column_parameters = self.c_q.column_parameters
+            self.c_v.column_parameters = self.c_q.column_parameters
+        
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
         self.qk_norm = build_norm_strategy(
@@ -164,7 +194,7 @@ class Block(nn.Module):
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
         self.pre_attn_norm = build_norm_strategy(
-            NormType(config.pre_attn_norm_type),
+            NormType(config.norm_type),  # make it have the same norm type!
             config.n_embd,
             eps=config.norm_eps,
         )
@@ -344,18 +374,20 @@ class GPT(nn.Module):
 
         elif isinstance(module, ColumnMLPFusedStrategy):
             nn.init.ones_(module.norm_parameters)
+            self._init_weights(module.linear)
 
         elif isinstance(module, RowMLPFusedStrategy):
             nn.init.ones_(module.norm_parameters)
-
+            self._init_weights(module.linear)
+            
         elif isinstance(module, FullMLPFusedStrategy):
             nn.init.ones_(module.column_parameters)
             nn.init.ones_(module.row_parameters)
+            self._init_weights(module.linear)
 
         elif isinstance(module, BlockMLPStrategy):
             nn.init.ones_(module.block_scale)
-
-
+            self._init_weights(module.linear)
 
 
     # TODO: bump base theta more, e.g. 100K is more common more recently
