@@ -11,7 +11,7 @@
 #SBATCH --container-writable
 #SBATCH --output=logs/depth_abl_%A_%a.out
 #SBATCH --error=logs/depth_abl_%A_%a.err
-#SBATCH --array=0-5
+#SBATCH --array=0-7
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -26,8 +26,8 @@ echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
 echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
 # -------------------- CONFIG GRID --------------------
-DEPTHS=(12 16 24)
-N_EMBD=-1          # fix n_embd, or put -1 to derive from depth
+DEPTHS=(12 16 20 24)
+N_EMBD=1024          # fix n_embd, or put -1 to derive from depth
 NORMS=("rms" "learnable_rms")
 
 ID=${SLURM_ARRAY_TASK_ID}
@@ -51,8 +51,8 @@ else
     N_EMBD_LABEL="e-derived-${N_DERIVED}"
 fi
 # Give each run a unique WandB name
-WANDB_RUN="d${DEPTH}_${N_EMBD_LABEL}_${NORM_TYPE}"
-WANDB_NOTES="depth ${DEPTH}, norm ${NORM_TYPE}, embd ${N_EMBD_LABEL}, use_muon ${USE_MUON}, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
+WANDB_RUN="d${DEPTH}_${N_EMBD_LABEL}_${NORM_TYPE}_gamma_init_1.0"
+WANDB_NOTES="depth ${DEPTH}, norm ${NORM_TYPE}, embd ${N_EMBD_LABEL}, use_muon ${USE_MUON}, gamma_init 1.0, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
 
 # -------------------- DDP ENV --------------------
 export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)

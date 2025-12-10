@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_nembd_ablation
+#SBATCH --job-name=nanochat_depth_ablation_derived_n_embed
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,8 +9,8 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/nembd_abl_%A_%a.out
-#SBATCH --error=logs/nembd_abl_%A_%a.err
+#SBATCH --output=logs/depth_abl_derived_%A_%a.out
+#SBATCH --error=logs/depth_abl_derived_%A_%a.err
 #SBATCH --array=0-5
 
 export TORCH_SHOW_FULL_TRACEBACK=1
@@ -26,15 +26,15 @@ echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
 echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
 # -------------------- CONFIG GRID --------------------
-DEPTH=20                           # fix depth
-NEMBDS=(512 768 1024)
+DEPTHS=(12 16 24)
+N_EMBD=-1          # fix n_embd, or put -1 to derive from depth
 NORMS=("rms" "learnable_rms")
 
 ID=${SLURM_ARRAY_TASK_ID}
-EMB_IDX=$(( ID / 2 ))
+DEPTH_IDX=$(( ID / 2 ))
 NORM_IDX=$(( ID % 2 ))
 
-N_EMBD=${NEMBDS[$EMB_IDX]}
+DEPTH=${DEPTHS[$DEPTH_IDX]}
 NORM_TYPE=${NORMS[$NORM_IDX]}
 
 USE_MUON=false
@@ -43,9 +43,16 @@ echo "[sbatch-master] depth=${DEPTH}, n_embd=${N_EMBD}, norm_type=${NORM_TYPE}, 
 
 NPROC_PER_NODE=4
 
-# Unique WandB name
-WANDB_RUN="d${DEPTH}_e${N_EMBD}_${NORM_TYPE}_gamma_init_1.0"
-WANDB_NOTES="depth ${DEPTH}, n_embd ${N_EMBD}, norm ${NORM_TYPE}, use_muon ${USE_MUON}, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
+# N_EMBD if set, otherwise "derive from depth"
+if [ "$N_EMBD" -gt 0 ]; then
+    N_EMBD_LABEL="e${N_EMBD}"
+else
+    N_DERIVED=$(( DEPTH * 64 ))
+    N_EMBD_LABEL="e-derived-${N_DERIVED}"
+fi
+# Give each run a unique WandB name
+WANDB_RUN="d${DEPTH}_${N_EMBD_LABEL}_${NORM_TYPE}_gamma_init_1.0"
+WANDB_NOTES="depth ${DEPTH}, norm ${NORM_TYPE}, embd ${N_EMBD_LABEL}, use_muon ${USE_MUON}, gamma_init 1.0, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
 
 # -------------------- DDP ENV --------------------
 export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
