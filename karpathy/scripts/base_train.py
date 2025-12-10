@@ -38,7 +38,8 @@ device_type = "" # cuda|cpu|mps (empty => autodetect good device type default, i
 # Model architecture
 depth = 20 # the depth of the Transformer model to train, rest of the kwargs are derived
 max_seq_len = 2048 # max context length
-
+n_embd = -1 # model embedding dimension; if -1, derive from depth (depth * 64)
+init_type = "scaled"      # "scaled", "xavier", "kaiming"
 
 # Normalization
 norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
@@ -108,7 +109,7 @@ def main():
 
     # Model kwargs are derived from the desired depth of the model
     num_layers = depth
-    model_dim = depth * 64 # aspect ratio 64 (usually this is varied from 64 -> 128 as model size increases)
+    model_dim = depth * 64 if n_embd == -1 else n_embd # aspect ratio 64 (usually this is varied from 64 -> 128 as model size increases)
     num_heads = max(1, (model_dim + 127) // 128) # head dim 128 (the division here is ceil div)
     num_kv_heads = num_heads # default is 1:1 GQA (Group Query Attention) ratio (i.e. GQA is disabled)
     print0(f"num_layers: {num_layers}")
@@ -141,6 +142,8 @@ def main():
         pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),
         embed_norm_type=(embed_norm_type if embed_norm_type != "" else None),
         final_norm_type=(final_norm_type if final_norm_type != "" else None),
+        init_type=init_type,
+        use_muon=(use_muon == "true"),
     )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)

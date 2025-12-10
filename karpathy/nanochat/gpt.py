@@ -23,8 +23,8 @@ from nanochat.common import get_dist_info, print0
 from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
 
-from nanochat.owned.normalization_strategy import NormType, build_norm_strategy
-from nanochat.owned.mlp_fused_strategy import build_mlp_strategy
+from nanochat.owned.normalization_strategy import LearnableRMSNormStrategy, NormType, build_norm_strategy
+from nanochat.owned.mlp_fused_strategy import BlockMLPStrategy, ColumnMLPFusedStrategy, FullMLPFusedStrategy, RowMLPFusedStrategy, build_mlp_strategy
 
 @dataclass
 class GPTConfig:
@@ -49,6 +49,9 @@ class GPTConfig:
     
 
     use_muon: str = "false"
+    
+    init_type: str = "scaled"  # "scaled", "xavier", "kaiming"
+
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -241,17 +244,119 @@ class GPT(nn.Module):
         if self.transformer.wte.weight.device.type == "cuda":
             self.transformer.wte.to(dtype=torch.bfloat16)
 
+        # --- DEBUG: verify scale params are all ones ---
+        ddp, rank, *_ = get_dist_info()
+        is_master = (not ddp) or (rank == 0)
+
+        if is_master:
+            with torch.no_grad():
+                for name, module in self.named_modules():
+                    if isinstance(module, LearnableRMSNormStrategy):
+                        g = module.gamma
+                        if not torch.allclose(g, torch.ones_like(g), atol=1e-6):
+                            raise RuntimeError(
+                                f"[RMSNorm gamma check] {name}.gamma is not all ones. "
+                                f"mean={g.mean().item():.6f}, min={g.min().item():.6f}, max={g.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[RMSNorm gamma check] {name}.gamma OK (all ones, dim={g.numel()})")
+                    elif isinstance(module, ColumnMLPFusedStrategy):
+                        p = module.norm_parameters
+                        if not torch.allclose(p, torch.ones_like(p), atol=1e-6):
+                            raise RuntimeError(
+                                f"[ColumnMLPFusedStrategy norm_parameters check] {name}.norm_parameters is not all ones. "
+                                f"mean={p.mean().item():.6f}, min={p.min().item():.6f}, max={p.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[ColumnMLPFusedStrategy norm_parameters check] {name}.norm_parameters OK (all ones, dim={p.numel()})")
+                    elif isinstance(module, RowMLPFusedStrategy):
+                        p = module.norm_parameters
+                        if not torch.allclose(p, torch.ones_like(p), atol=1e-6):
+                            raise RuntimeError(
+                                f"[RowMLPFusedStrategy norm_parameters check] {name}.norm_parameters is not all ones. "
+                                f"mean={p.mean().item():.6f}, min={p.min().item():.6f}, max={p.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[RowMLPFusedStrategy norm_parameters check] {name}.norm_parameters OK (all ones, dim={p.numel()})")
+                    elif isinstance(module, FullMLPFusedStrategy):
+                        cp = module.column_parameters
+                        rp = module.row_parameters
+                        if not torch.allclose(cp, torch.ones_like(cp), atol=1e-6):
+                            raise RuntimeError(
+                                f"[FullMLPFusedStrategy column_parameters check] {name}.column_parameters is not all ones. "
+                                f"mean={cp.mean().item():.6f}, min={cp.min().item():.6f}, max={cp.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[FullMLPFusedStrategy column_parameters check] {name}.column_parameters OK (all ones, dim={cp.numel()})")
+                        if not torch.allclose(rp, torch.ones_like(rp), atol=1e-6):
+                            raise RuntimeError(
+                                f"[FullMLPFusedStrategy row_parameters check] {name}.row_parameters is not all ones. "
+                                f"mean={rp.mean().item():.6f}, min={rp.min().item():.6f}, max={rp.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[FullMLPFusedStrategy row_parameters check] {name}.row_parameters OK (all ones, dim={rp.numel()})")
+                    elif isinstance(module, BlockMLPStrategy):
+                        bs = module.block_scale
+                        if not torch.allclose(bs, torch.ones_like(bs), atol=1e-6):
+                            raise RuntimeError(
+                                f"[BlockMLPStrategy block_scale check] {name}.block_scale is not all ones. "
+                                f"mean={bs.mean().item():.6f}, min={bs.min().item():.6f}, max={bs.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[BlockMLPStrategy block_scale check] {name}.block_scale OK (all ones, shape={bs.shape})")
+        # --- END DEBUG ---
+
+
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            # https://arxiv.org/pdf/2310.17813
             fan_out = module.weight.size(0)
             fan_in = module.weight.size(1)
-            std = 1.0 / math.sqrt(fan_in) * min(1.0, math.sqrt(fan_out / fan_in))
-            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+
+            itype = getattr(self.config, "init_type", "scaled")
+
+            if itype == "scaled":
+                # your current default
+                std = 1.0 / math.sqrt(fan_in) * min(1.0, math.sqrt(fan_out / fan_in))
+                torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+
+            elif itype == "xavier":
+                # Xavier / Glorot normal
+                std = math.sqrt(2.0 / (fan_in + fan_out))
+                torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+
+            elif itype == "kaiming":
+                # Kaiming He normal (for ReLU-style activations)
+                std = math.sqrt(2.0 / fan_in)
+                torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+
+            else:
+                raise ValueError(f"Unknown init_type: {itype}")
+
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+
         elif isinstance(module, nn.Embedding):
+            # keep this constant across inits to isolate the effect on linear layers
             torch.nn.init.normal_(module.weight, mean=0.0, std=1.0)
+
+        elif isinstance(module, LearnableRMSNormStrategy):
+            nn.init.ones_(module.gamma)
+
+        elif isinstance(module, ColumnMLPFusedStrategy):
+            nn.init.ones_(module.norm_parameters)
+
+        elif isinstance(module, RowMLPFusedStrategy):
+            nn.init.ones_(module.norm_parameters)
+
+        elif isinstance(module, FullMLPFusedStrategy):
+            nn.init.ones_(module.column_parameters)
+            nn.init.ones_(module.row_parameters)
+
+        elif isinstance(module, BlockMLPStrategy):
+            nn.init.ones_(module.block_scale)
+
+
+
 
     # TODO: bump base theta more, e.g. 100K is more common more recently
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):

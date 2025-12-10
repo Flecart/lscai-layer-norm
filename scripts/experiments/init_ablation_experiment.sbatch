@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_nembd_ablation
+#SBATCH --job-name=nanochat_init_ablation
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,13 +9,14 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/nembd_abl_%A_%a.out
-#SBATCH --error=logs/nembd_abl_%A_%a.err
+#SBATCH --output=logs/init_abl_%A_%a.out
+#SBATCH --error=logs/init_abl_%A_%a.err
 #SBATCH --array=0-5
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export OMP_NUM_THREADS=1
+ulimit -c 0   # avoid core_nid* dumps
 
 set -eo pipefail
 
@@ -26,26 +27,35 @@ echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
 echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
 # -------------------- CONFIG GRID --------------------
-DEPTH=20                           # fix depth
-NEMBDS=(512 768 1024)
+DEPTH=20
+N_EMBD=-1                    # derive from depth (depth * 64) or set to fixed value
+INIT_TYPES=("xavier" "kaiming")
 NORMS=("rms" "learnable_rms")
 
 ID=${SLURM_ARRAY_TASK_ID}
-EMB_IDX=$(( ID / 2 ))
+INIT_IDX=$(( ID / 2 ))
 NORM_IDX=$(( ID % 2 ))
 
-N_EMBD=${NEMBDS[$EMB_IDX]}
+INIT_TYPE=${INIT_TYPES[$INIT_IDX]}
 NORM_TYPE=${NORMS[$NORM_IDX]}
 
 USE_MUON=false
 
-echo "[sbatch-master] depth=${DEPTH}, n_embd=${N_EMBD}, norm_type=${NORM_TYPE}, use_muon=${USE_MUON}"
+echo "[sbatch-master] depth=${DEPTH}, n_embd=${N_EMBD}, init_type=${INIT_TYPE}, norm_type=${NORM_TYPE}, use_muon=${USE_MUON}"
 
 NPROC_PER_NODE=4
 
-# Unique WandB name
-WANDB_RUN="d${DEPTH}_e${N_EMBD}_${NORM_TYPE}_gamma_init_1.0"
-WANDB_NOTES="depth ${DEPTH}, n_embd ${N_EMBD}, norm ${NORM_TYPE}, use_muon ${USE_MUON}, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
+# Label for n_embd in run name
+if [ "$N_EMBD" -gt 0 ]; then
+    N_EMBD_LABEL="e${N_EMBD}"
+else
+    N_DERIVED=$(( DEPTH * 64 ))
+    N_EMBD_LABEL="e-derived-${N_DERIVED}"
+fi
+
+# Give each run a unique WandB name
+WANDB_RUN="d${DEPTH}_${N_EMBD_LABEL}_${INIT_TYPE}_${NORM_TYPE}_gamma_init_1.0"
+WANDB_NOTES="depth ${DEPTH}, embd ${N_EMBD_LABEL}, init ${INIT_TYPE}, norm ${NORM_TYPE}, use_muon ${USE_MUON}, mlp_type default, qk_norm_type rms, pre_attn_norm_type rms"
 
 # -------------------- DDP ENV --------------------
 export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
@@ -85,6 +95,7 @@ python3 -m torch.distributed.run \
     --run='"$WANDB_RUN"' \
     --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
+    --init_type='"$INIT_TYPE"' \
     --qk_norm_type=rms \
     --pre_attn_norm_type=rms \
     --norm_eps=1e-6 \

@@ -83,12 +83,9 @@ python3 -m torch.distributed.run \
     --run='"$WANDB_RUN"' \
     --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
-<<<<<<< Updated upstream
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-=======
->>>>>>> Stashed changes
     --mlp_type='"$MLP_TYPE"'
 '
 
