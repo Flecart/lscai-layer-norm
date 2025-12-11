@@ -1,68 +1,98 @@
-# lscai-layer-norm
-Poorly written readme, this is going to get better ;)
+# Normalization Layers Are Not What You Need
+
+Research project investigating normalization strategies and MLP fusion techniques in transformer models for AI training, done as part of the Large-Scale AI Engineering course in Fall 2025. Built on Karpathy's nanochat framework, this repository contains experimentation with different normalization approaches including RMSNorm variants and LayerNorm.
+
+## Quick Start
 
 ### Bootstrap environment
-To boostrap the training environment run:
+
+Set up the training environment with PyTorch container and virtual environment:
+
 ```bash
 ./bootstrap.sh
 ```
 
-This creates also a virtual environment in `.venv`, so that it matches the container's pytorch
-installation. 
+This script:
+- Creates a virtual environment in `.venv` matching the container's PyTorch installation
+- Installs dependencies outside the Docker image but inside the container
+- Follows [CSCS documentation guidelines](https://docs.cscs.ch/software/ml/pytorch/#optionally-extend-container-with-virtual-environment)
 
-The dependencies are installed in the `.venv`, outside of the docker image build, but inside the container, as suggested by the [Documentation](https://docs.cscs.ch/software/ml/pytorch/#optionally-extend-container-with-virtual-environment)
+### Interactive Development
 
+Get a compute node with the configured environment:
 
-if you get a compute node with the correct environment we built in the bootstrap.
 ```bash
 srun --account=large-sc-2 -p debug --time=60:00 --environment=ngc_pt_jan --pty bash
 ```
 
-activate the venv
+Activate the virtual environment:
+
 ```bash
 source .venv/bin/activate
 ```
 
-you'll see that cuda is correctly available from the venv
+Verify CUDA availability:
+
 ```bash
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
 
-### wandb
-Create `.wandb.env` file and paste the contents of `wandb.env.example`.
-Use your own api key.
+### Configuration
 
-### Test the tokenizer
+#### WandB Setup
+Create a `.wandb.env` file for experiment tracking:
+
+```bash
+cp wandb.env.example .wandb.env
+# Edit .wandb.env with your WandB API key
+```
+
+## Running Experiments
+
+### Test the Tokenizer
 ```bash
 sbatch run_tok_train.sbatch
 ```
 
-### Train nanochat
+### Train Base Model - nanochat
+
+Submit a training job using one of the experiment configurations:
+
 ```bash
-sbatch run_nanochat.sbatch
+# Baselines
+sbatch scripts/experiments/baseline_layer_norm.sbatch        # Standard LayerNorm
+sbatch scripts/experiments/baseline_no_learnable_norm.sbatch # Parameter-free RMSNorm
+
+# MLP Fusion Strategies
+sbatch scripts/experiments/rms_column.sbatch   # Column-wise scaling (input dimension)
+sbatch scripts/experiments/rms_row.sbatch      # Row-wise scaling (output dimension)
+sbatch scripts/experiments/rms_full.sbatch     # Full bidirectional scaling
+sbatch scripts/experiments/rms_patched.sbatch  # Block-wise/patch scaling
+
+# TorusNorm Experiments
+sbatch scripts/experiments/torus_norm_everywhere.sbatch  # TorusNorm at all positions
+sbatch scripts/experiments/torus_norm_pre_mlp.sbatch     # TorusNorm only before MLPs
 ```
 
-### Logs
-All logs are inside `/logs`
+### View Logs
+
+All training logs are saved to `/logs/` with job-specific filenames containing the SLURM job ID.
 
 
+## Nematus (Alternative Backend)
 
-
-## Nematus
-run the bootstrap script:
+Bootstrap Nematus environment (takes ~30 minutes):
 
 ```bash
 cd nematus
 ./scripts/bootstrap_nematus.sh
 ```
 
-this might take around 30 minutes.
-
-
-from `nematus/`, train the model with:
+Train with Nematus:
 
 ```bash
+cd nematus
 sbatch scripts/experiments/run_nematus.sbatch
 ```
 
-all logs are inside `nematus/logs`.
+Logs are saved to `nematus/logs/`.
