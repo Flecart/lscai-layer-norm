@@ -44,6 +44,8 @@ class GPTConfig:
 
     embed_norm_type: str = "rms"
     final_norm_type: str = "rms"
+
+    attention_strategy: str = "default"  # "default", "pair_scaled"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str | None = "rms"  # if None, reuse norm_type
@@ -65,6 +67,124 @@ def apply_rotary_emb(x, cos, sin):
     out = torch.cat([y1, y2], 3) # re-assemble
     out = out.to(x.dtype) # ensure input/output dtypes match
     return out
+
+
+
+class PairScaledCausalSelfAttention(nn.Module):
+    """
+    Causal self-attention with:
+    - rotary embeddings
+    - optional QK normalization strategy (RMS/LAYER/TORUS/NONE)
+    - learnable per-2D-pair scaling in the attention score:
+        score = sum_i alpha_i * (q[2i:2i+2] · k[2i:2i+2])
+
+    Efficient implementation:
+    - learn log_alpha over pairs
+    - scale q and k by exp(0.5 * log_alpha) per pair (broadcasted)
+    - then call F.scaled_dot_product_attention (still fast)
+    """
+    def __init__(self, config, layer_idx):
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.n_head = config.n_head
+        self.n_kv_head = config.n_kv_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+
+        assert self.n_embd % self.n_head == 0
+        assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
+        assert self.head_dim % 2 == 0, "Pair scaling assumes head_dim is even (pairs of 2)."
+
+        if config.mlp_type != "default":
+            assert self.n_head == self.n_kv_head, (
+                "When using fused MLP strategies, please set n_head == n_kv_head for simplicity."
+            )
+
+        # Projections
+        self.c_q = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_head * self.head_dim, bias=False)
+        self.c_k = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_v = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+
+        # tie weights for q,k,v projections if column_parameter is present
+        if hasattr(self.c_q, "column_parameters") and hasattr(self.c_k, "column_parameters") and hasattr(self.c_v, "column_parameters"):
+            self.c_k.column_parameters = self.c_q.column_parameters
+            self.c_v.column_parameters = self.c_q.column_parameters
+
+        self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+
+        # QK norm
+        qk_norm_type = NormType(config.qk_norm_type)
+        qk_norm_kwargs = dict(eps=config.norm_eps)
+        # If you set qk_norm_type="torus" and want pairs, make it explicit here:
+        if qk_norm_type == NormType.TORUS:
+            qk_norm_kwargs["group_size"] = 2
+        self.qk_norm = build_norm_strategy(qk_norm_type, self.head_dim, **qk_norm_kwargs)
+
+        # Learnable per-pair weights (shared across heads; simplest + fast)
+        n_pairs = self.head_dim // 2
+        self.log_alpha = nn.Parameter(torch.zeros(n_pairs))  # alpha = exp(log_alpha), init alpha=1
+
+    def _apply_pair_scaling(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        t: (..., head_dim)
+        scales pairs (0,1), (2,3), ... by sqrt(alpha_i)
+        """
+        # scale_per_pair = sqrt(alpha) = exp(0.5 * log_alpha)
+        scale_per_pair = torch.exp(0.5 * self.log_alpha)  # (n_pairs,)
+        scale = scale_per_pair.repeat_interleave(2)        # (head_dim,)
+        return t * scale
+
+    def forward(self, x, cos_sin, kv_cache):
+        B, T, C = x.size()
+
+        # Project
+        q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+        k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+        v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+
+        # Rotary
+        cos, sin = cos_sin
+        q = apply_rotary_emb(q, cos, sin)
+        k = apply_rotary_emb(k, cos, sin)
+
+        # QK norm
+        q = self.qk_norm(q)
+        k = self.qk_norm(k)
+
+        # Pair scaling (broadcast across batch/time/heads)
+        q = self._apply_pair_scaling(q)
+        k = self._apply_pair_scaling(k)
+
+        # (B, T, H, D) -> (B, H, T, D)
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        # KV cache
+        if kv_cache is not None:
+            k, v = kv_cache.insert_kv(self.layer_idx, k, v)
+
+        Tq = q.size(2)
+        Tk = k.size(2)
+
+        enable_gqa = self.n_head != self.n_kv_head
+        if kv_cache is None or Tq == Tk:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=enable_gqa)
+        elif Tq == 1:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=enable_gqa)
+        else:
+            attn_mask = torch.zeros((Tq, Tk), dtype=torch.bool, device=q.device)
+            prefix_len = Tk - Tq
+            if prefix_len > 0:
+                attn_mask[:, :prefix_len] = True
+            attn_mask[:, prefix_len:] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, enable_gqa=enable_gqa)
+
+        # Re-assemble + proj
+        y = y.transpose(1, 2).contiguous().view(B, T, -1)
+        y = self.c_proj(y)
+        return y
+
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config, layer_idx):
@@ -189,7 +309,14 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
-        self.attn = CausalSelfAttention(config, layer_idx)
+
+        if config.attention_strategy == "pair_scaled":
+            self.attn = PairScaledCausalSelfAttention(config, layer_idx)
+        elif config.attention_strategy == "default":
+            self.attn = CausalSelfAttention(config, layer_idx)
+        else:
+            raise ValueError(f"Unknown attention_strategy: {config.attention_strategy}")
+
         self.mlp = MLP(config)
 
         # Removing this for simplicity of the analysis.
@@ -335,6 +462,16 @@ class GPT(nn.Module):
                             )
                         else:
                             print(f"[BlockMLPStrategy block_scale check] {name}.block_scale OK (all ones, shape={bs.shape})")
+                    elif isinstance(module, PairScaledCausalSelfAttention):
+                        la = module.log_alpha
+                        if not torch.allclose(la, torch.zeros_like(la), atol=1e-6):
+                            raise RuntimeError(
+                                f"[PairScaledAttn log_alpha check] {name}.log_alpha is not all zeros. "
+                                f"mean={la.mean().item():.6f}, min={la.min().item():.6f}, max={la.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[PairScaledAttn log_alpha check] {name}.log_alpha OK (all zeros, n={la.numel()})")
+
         # --- END DEBUG ---
 
 
@@ -389,6 +526,10 @@ class GPT(nn.Module):
         elif isinstance(module, BlockMLPStrategy):
             nn.init.ones_(module.block_scale)
             self._init_weights(module.linear)
+        
+        elif isinstance(module, PairScaledCausalSelfAttention):
+            nn.init.zeros_(module.log_alpha)  # alpha = exp(0) = 1
+
 
 
     # TODO: bump base theta more, e.g. 100K is more common more recently
