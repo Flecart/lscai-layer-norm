@@ -75,6 +75,8 @@ init_type = "scaled"      # "scaled", "xavier", "kaiming"
 # Normalization
 norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
 mlp_type = "default"            # "default", "column", "row", "full", "patched"
+mlp_type_qkv = "default"        # "default", "column", "row", "full", "patched"
+
 qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
 pre_attn_norm_type = "rms"      # "" => use norm_type; or "none", "rms", ...
 
@@ -168,6 +170,7 @@ def main():
         n_embd=model_dim,
         norm_type=norm_type,
         mlp_type=mlp_type,
+        mlp_type_qkv=mlp_type_qkv,
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
         pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),

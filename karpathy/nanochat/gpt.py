@@ -40,6 +40,7 @@ class GPTConfig:
     norm_eps: float | None = None  # used e.g. for RMSNorm
     
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
+    mlp_type_qkv: str = "default"  # "default", "column", "row", "full", "patched"
 
     embed_norm_type: str = "rms"
     final_norm_type: str = "rms"
@@ -81,21 +82,21 @@ class CausalSelfAttention(nn.Module):
         
         # self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
         self.c_q = build_mlp_strategy(
-            config.mlp_type,
+            config.mlp_type_qkv,
             self.n_embd,
             self.n_head * self.head_dim,
             bias=False
         )
         # self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_k = build_mlp_strategy(
-            config.mlp_type,
+            config.mlp_type_qkv,
             self.n_embd,
             self.n_kv_head * self.head_dim,
             bias=False
         )
         # self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_v = build_mlp_strategy(
-            config.mlp_type,
+            config.mlp_type_qkv,
             self.n_embd,
             self.n_kv_head * self.head_dim,
             bias=False
@@ -194,7 +195,7 @@ class Block(nn.Module):
         # Removing this for simplicity of the analysis.
         # pre-attn and pre-mlp norms (and you can add post norms if you want later)
         self.pre_attn_norm = build_norm_strategy(
-            NormType(config.norm_type),  # make it have the same norm type!
+            NormType(config.pre_attn_norm_type),
             config.n_embd,
             eps=config.norm_eps,
         )
@@ -442,7 +443,11 @@ class GPT(nn.Module):
             print(f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}")
 
         # Create the Muon optimizer for the linear layers
-        block_params = list(block_params)
+        block_params = (
+            list(self.transformer.h.parameters())
+            + list(self.embed_norm.parameters())
+            + list(self.final_norm.parameters())
+        )
         matrix_params = [p for p in block_params if p.ndim == 2]
         rmsnorm_params = [p for p in block_params if p.ndim == 1]
         if rank == 0:
