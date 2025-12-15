@@ -45,6 +45,7 @@ class GPTConfig:
     embed_norm_type: str = "rms"
     final_norm_type: str = "rms"
 
+    group_size_torus_norm: int = 2    # only used if norm_type is "torus"
     attention_strategy: str = "default"  # "default", "pair_scaled"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
@@ -113,12 +114,12 @@ class PairScaledCausalSelfAttention(nn.Module):
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
         # QK norm
-        qk_norm_type = NormType(config.qk_norm_type)
-        qk_norm_kwargs = dict(eps=config.norm_eps)
-        # If you set qk_norm_type="torus" and want pairs, make it explicit here:
-        if qk_norm_type == NormType.TORUS:
-            qk_norm_kwargs["group_size"] = 2
-        self.qk_norm = build_norm_strategy(qk_norm_type, self.head_dim, **qk_norm_kwargs)
+        self.qk_norm = build_norm_strategy(
+            NormType(config.qk_norm_type),
+            self.head_dim,
+            eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
+        )
 
         # Learnable per-pair weights (shared across heads; simplest + fast)
         n_pairs = self.head_dim // 2
@@ -233,7 +234,8 @@ class CausalSelfAttention(nn.Module):
         self.qk_norm = build_norm_strategy(
             NormType(config.qk_norm_type),
             self.head_dim,
-            eps=config.norm_eps
+            eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
 
@@ -325,11 +327,13 @@ class Block(nn.Module):
             NormType(config.pre_attn_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
         self.pre_mlp_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
 
@@ -375,11 +379,13 @@ class GPT(nn.Module):
             NormType(config.embed_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
         self.final_norm = build_norm_strategy(
             NormType(config.final_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
         # Debug flag to avoid spamming prints every forward
@@ -624,7 +630,7 @@ class GPT(nn.Module):
         else:
             # see muon init, copying that part here.
             for size in {p.numel() for p in matrix_params}:
-                group = dict(params=[p for p in matrix_params if p.numel() == size])
+                group = dict(params=[p for p in matrix_params if p.numel() == size], lr=matrix_lr * dmodel_lr_scale)
                 adam_groups.append(group)
 
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)

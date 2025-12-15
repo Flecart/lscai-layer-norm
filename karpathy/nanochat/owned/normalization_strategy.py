@@ -79,31 +79,31 @@ class TorusNormStrategy(NormStrategy):
     def __init__(
         self,
         dim: int,
-        group_size: int = 2,
+        group_size_torus_norm: int = 2,
         radius: float | None = None,   # per-group radius in R^group_size
         eps: float = 1e-6,
         learnable_radius: bool = False,
     ):
         super().__init__(dim)
 
-        if group_size <= 1:
-            raise ValueError(f"group_size must be >= 2, got {group_size}.")
-        if dim % group_size != 0:
+        if group_size_torus_norm <= 1:
+            raise ValueError(f"group_size_torus_norm must be >= 2, got {group_size_torus_norm}.")
+        if dim % group_size_torus_norm != 0:
             raise ValueError(
-                f"TorusNormStrategy requires dim % group_size == 0, "
-                f"got dim={dim}, group_size={group_size}."
+                f"TorusNormStrategy requires dim % group_size_torus_norm == 0, "
+                f"got dim={dim}, group_size_torus_norm={group_size_torus_norm}."
             )
 
         self.eps = eps
-        self.group_size = group_size
-        num_groups = dim // group_size
+        self.group_size = group_size_torus_norm
+        num_groups = dim // group_size_torus_norm
 
         if learnable_radius:
             raise NotImplementedError("learnable_radius not supported with meta-init yet")
 
         # Pick radius s.t. total ||x|| ≈ sqrt(dim): r_group = sqrt(group_size)
         if radius is None:
-            radius = math.sqrt(float(group_size))
+            radius = math.sqrt(float(group_size_torus_norm))
         # Just store as a Python float; no buffer, no Parameter
         self.radius = float(radius)
 

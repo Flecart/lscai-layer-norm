@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_torus_norm_everywhere_attention_strategy
+#SBATCH --job-name=nanochat_torus_group_size_sweep
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,13 +9,13 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/torus_norm_everywhere_attention_strategy_%j.out
-#SBATCH --error=logs/torus_norm_everywhere_attention_strategy_%j.err
+#SBATCH --output=logs/torus_group_size_%A_%a.out
+#SBATCH --error=logs/torus_group_size_%A_%a.err
+#SBATCH --array=0-7
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export OMP_NUM_THREADS=1
-
 
 set -eo pipefail
 
@@ -23,46 +23,49 @@ echo "[sbatch-master] running on $(hostname)"
 echo "[sbatch-master] SLURM_NODELIST: $SLURM_NODELIST"
 echo "[sbatch-master] SLURM_NNODES:   $SLURM_NNODES"
 echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
+echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
-echo "[sbatch-master] setting DDP env vars"
+# -------------------- CONFIG GRID --------------------
+GROUP_SIZES=(2 4 8 16 32 64 128 256)   # <- sweep these
+ID=${SLURM_ARRAY_TASK_ID}
+GROUP_SIZE_TORUS_NORM=${GROUP_SIZES[$ID]}
 
-export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
-export MASTER_PORT=12345         # pick a free port
-export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
+# Fixed experiment settings (same as your single-run script)
+NPROC_PER_NODE=4
+WANDB_RUN_PREFIX="torus-norm-everywhere-pairscaled-gs"
+WANDB_NOTES_PREFIX="Torus normalization everywhere + pair_scaled attention; sweep group_size_torus_norm"
 
-NPROC_PER_NODE=4                           # == gpus-per-node
-WANDB_RUN=torus-norm-everywhere-new-attention               # adjust as you like
-
-# Normalization hyperparameters
-NORM_TYPE=torus                          # choose from: layernorm, rms, learnable_rms, none, torus
-NORM_EPS=1e-6                            # epsilon value for normalization layers
-MLP_TYPE=default                         # choose from: default, column, row, full, patched
+NORM_TYPE=torus
+NORM_EPS=1e-6
+MLP_TYPE=default
 EMBED_NORM_TYPE=torus
 FINAL_NORM_TYPE=torus
-ATTENTION_STRATEGY=pair_scaled            # choose from: default, pair_scaled
-GROUP_SIZE_TORUS_NORM=4                 # only used if NORM_TYPE is torus
-
+ATTENTION_STRATEGY=pair_scaled
 QK_NORM_TYPE=torus
 PRE_ATTN_NORM_TYPE=torus
 USE_MUON=false
+DEPTH=20
 
-export WANDB_NOTES="Torus normalization everywhere with new attention strategy"
+WANDB_RUN="${WANDB_RUN_PREFIX}${GROUP_SIZE_TORUS_NORM}"
+WANDB_NOTES="${WANDB_NOTES_PREFIX}, group_size_torus_norm ${GROUP_SIZE_TORUS_NORM}"
+
+echo "[sbatch-master] depth=${DEPTH}, group_size_torus_norm=${GROUP_SIZE_TORUS_NORM}, attention_strategy=${ATTENTION_STRATEGY}, use_muon=${USE_MUON}"
+
+# -------------------- DDP ENV --------------------
+export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
+export MASTER_PORT=12345
+export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
 echo "[sbatch-master] launching srun/torchrun"
+
 CMD='
 echo "[srun] rank=$SLURM_PROCID host=$(hostname) node_rank=$SLURM_NODEID local_rank=$SLURM_LOCALID"
 
-# 1. Explicitly CD to the correct directory inside the srun task
-echo "[srun] Changing to work directory"
 cd "$HOME/scratch/lscai-layer-norm"
 
-# 2. Activate the virtual environment *inside this shell*
-echo "[srun] Activating .venv"
 source .venv/bin/activate
 echo "[srun] Python executable: $(which python)"
-# ----------------------------------------------------
 
-# 3. source wandb env vars
 if [[ -f ".wandb.env" ]]; then
     echo "[srun] Sourcing .wandb.env"
     source .wandb.env
@@ -71,13 +74,13 @@ else
     export WANDB_RUN=""
 fi
 
-# 4 verify if WANDB_API_KEY is set
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
     echo "[srun] WARNING: WANDB_API_KEY is not set. WandB logging will be disabled."
     export WANDB_DISABLED=true
 fi
 
 cd karpathy
+
 python3 -m torch.distributed.run \
   --nnodes='"$SLURM_NNODES"' \
   --node_rank=$SLURM_NODEID \
@@ -85,7 +88,7 @@ python3 -m torch.distributed.run \
   --master_addr='"$MASTER_ADDR"' \
   --master_port='"$MASTER_PORT"' \
   -m scripts.base_train -- \
-    --depth=20 \
+    --depth='"$DEPTH"' \
     --run='"$WANDB_RUN"' \
     --notes="'"$WANDB_NOTES"'" \
     --norm_type='"$NORM_TYPE"' \
@@ -98,9 +101,7 @@ python3 -m torch.distributed.run \
     --use_muon='"$USE_MUON"' \
     --attention_strategy='"$ATTENTION_STRATEGY"' \
     --group_size_torus_norm='"$GROUP_SIZE_TORUS_NORM"'
-    
 '
 
 srun bash -c "$CMD"
-
 echo "[sbatch-master] task finished"
