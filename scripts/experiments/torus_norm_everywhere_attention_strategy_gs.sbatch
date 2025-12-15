@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_torus_group_size_sweep
+#SBATCH --job-name=nanochat_torus_group_size_sweep_attention_balance
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --container-writable
 #SBATCH --output=logs/torus_group_size_%A_%a.out
 #SBATCH --error=logs/torus_group_size_%A_%a.err
-#SBATCH --array=0-7
+#SBATCH --array=0-6
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -26,13 +26,13 @@ echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
 echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
 # -------------------- CONFIG GRID --------------------
-GROUP_SIZES=(2 4 8 16 32 64 128 256)   # <- sweep these
+GROUP_SIZES=(2 4 8 16 32 64 128)   # <- sweep these
 ID=${SLURM_ARRAY_TASK_ID}
 GROUP_SIZE_TORUS_NORM=${GROUP_SIZES[$ID]}
 
 # Fixed experiment settings (same as your single-run script)
 NPROC_PER_NODE=4
-WANDB_RUN_PREFIX="torus-norm-everywhere-pairscaled-gs"
+WANDB_RUN_PREFIX="torus-norm-attention-balance-gs"
 WANDB_NOTES_PREFIX="Torus normalization everywhere + pair_scaled attention; sweep group_size_torus_norm"
 
 NORM_TYPE=torus

@@ -72,18 +72,6 @@ def apply_rotary_emb(x, cos, sin):
 
 
 class PairScaledCausalSelfAttention(nn.Module):
-    """
-    Causal self-attention with:
-    - rotary embeddings
-    - optional QK normalization strategy (RMS/LAYER/TORUS/NONE)
-    - learnable per-2D-pair scaling in the attention score:
-        score = sum_i alpha_i * (q[2i:2i+2] · k[2i:2i+2])
-
-    Efficient implementation:
-    - learn log_alpha over pairs
-    - scale q and k by exp(0.5 * log_alpha) per pair (broadcasted)
-    - then call F.scaled_dot_product_attention (still fast)
-    """
     def __init__(self, config, layer_idx):
         super().__init__()
         self.layer_idx = layer_idx
@@ -94,19 +82,31 @@ class PairScaledCausalSelfAttention(nn.Module):
 
         assert self.n_embd % self.n_head == 0
         assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
-        assert self.head_dim % 2 == 0, "Pair scaling assumes head_dim is even (pairs of 2)."
 
-        if config.mlp_type != "default":
-            assert self.n_head == self.n_kv_head, (
-                "When using fused MLP strategies, please set n_head == n_kv_head for simplicity."
-            )
+        # For now, keep it simple/consistent: scaling is defined over full n_embd,
+        # so we require k to have the same total head layout as q.
+        # (If you really want GQA here, we can adapt it, but this is the clean fast version.)
+        assert self.n_kv_head == self.n_head, "pair/group scaling assumes n_kv_head == n_head (no GQA)."
+
+        # Torus group size (G). You said config.torus_norm_group_size
+        G = getattr(config, "torus_norm_group_size", None)
+        if G is None:
+            # fallback to your earlier naming if needed
+            G = getattr(config, "group_size_torus_norm", None)
+        assert G is not None, "Need config.torus_norm_group_size (or config.group_size_torus_norm)."
+        self.group_size = int(G)
+        assert self.group_size >= 2
+        assert self.n_embd % self.group_size == 0, "n_embd must be divisible by torus_norm_group_size."
+        assert self.head_dim % self.group_size == 0, "head_dim must be divisible by torus_norm_group_size."
+
+        self.groups_total = self.n_embd // self.group_size
+        self.groups_per_head = self.head_dim // self.group_size
 
         # Projections
         self.c_q = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_head * self.head_dim, bias=False)
         self.c_k = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_v = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
 
-        # tie weights for q,k,v projections if column_parameter is present
         if hasattr(self.c_q, "column_parameters") and hasattr(self.c_k, "column_parameters") and hasattr(self.c_v, "column_parameters"):
             self.c_k.column_parameters = self.c_q.column_parameters
             self.c_v.column_parameters = self.c_q.column_parameters
@@ -114,77 +114,78 @@ class PairScaledCausalSelfAttention(nn.Module):
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
         # QK norm
+        # Pass the torus group size into the norm strategy if you want torus on q/k
         self.qk_norm = build_norm_strategy(
             NormType(config.qk_norm_type),
             self.head_dim,
             eps=config.norm_eps,
-            group_size_torus_norm=config.group_size_torus_norm,
+            group_size_torus_norm=self.group_size,   # <-- align with torus grouping
         )
 
-        # Learnable per-pair weights (shared across heads; simplest + fast)
-        n_pairs = self.head_dim // 2
-        self.log_alpha = nn.Parameter(torch.zeros(n_pairs))  # alpha = exp(log_alpha), init alpha=1
+        # Learnable scaling per torus-group over the FULL embedding (n_embd/G)
+        # alpha = exp(log_alpha); we apply sqrt(alpha) to Q and K
+        self.log_alpha = nn.Parameter(torch.zeros(self.groups_total))  # init alpha=1
 
-    def _apply_pair_scaling(self, t: torch.Tensor) -> torch.Tensor:
+    def _apply_group_scaling_qk(self, t: torch.Tensor) -> torch.Tensor:
         """
-        t: (..., head_dim)
-        scales pairs (0,1), (2,3), ... by sqrt(alpha_i)
+        t: (B, T, H, head_dim)
+        scales each torus group of size G by sqrt(alpha_group).
+
+        log_alpha has shape (n_embd/G,).
+        We view it as (H, head_dim/G) to match head partitioning.
         """
-        # scale_per_pair = sqrt(alpha) = exp(0.5 * log_alpha)
-        scale_per_pair = torch.exp(0.5 * self.log_alpha)  # (n_pairs,)
-        scale = scale_per_pair.repeat_interleave(2)        # (head_dim,)
-        return t * scale
+        # (groups_total,) -> (H, groups_per_head)
+        scale_groups = torch.exp(0.5 * self.log_alpha).view(self.n_head, self.groups_per_head)
+
+        # expand each group over its G coordinates: (H, groups_per_head*G) == (H, head_dim)
+        scale_coords = scale_groups.repeat_interleave(self.group_size, dim=-1)
+
+        # broadcast to (B, T, H, head_dim)
+        return t * scale_coords.view(1, 1, self.n_head, self.head_dim)
 
     def forward(self, x, cos_sin, kv_cache):
         B, T, C = x.size()
 
-        # Project
         q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
         k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
         v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
 
-        # Rotary
         cos, sin = cos_sin
         q = apply_rotary_emb(q, cos, sin)
         k = apply_rotary_emb(k, cos, sin)
 
-        # QK norm
         q = self.qk_norm(q)
         k = self.qk_norm(k)
 
-        # Pair scaling (broadcast across batch/time/heads)
-        q = self._apply_pair_scaling(q)
-        k = self._apply_pair_scaling(k)
+        # group scaling aligned with torus groups over full embedding
+        q = self._apply_group_scaling_qk(q)
+        k = self._apply_group_scaling_qk(k)
 
-        # (B, T, H, D) -> (B, H, T, D)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # KV cache
         if kv_cache is not None:
             k, v = kv_cache.insert_kv(self.layer_idx, k, v)
 
-        Tq = q.size(2)
-        Tk = k.size(2)
+        Tq, Tk = q.size(2), k.size(2)
 
-        enable_gqa = self.n_head != self.n_kv_head
+        # since we asserted n_kv_head == n_head, enable_gqa is false here
         if kv_cache is None or Tq == Tk:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=enable_gqa)
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=False)
         elif Tq == 1:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=enable_gqa)
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=False)
         else:
             attn_mask = torch.zeros((Tq, Tk), dtype=torch.bool, device=q.device)
             prefix_len = Tk - Tq
             if prefix_len > 0:
                 attn_mask[:, :prefix_len] = True
             attn_mask[:, prefix_len:] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, enable_gqa=enable_gqa)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, enable_gqa=False)
 
-        # Re-assemble + proj
         y = y.transpose(1, 2).contiguous().view(B, T, -1)
-        y = self.c_proj(y)
-        return y
+        return self.c_proj(y)
+
 
 
 class CausalSelfAttention(nn.Module):

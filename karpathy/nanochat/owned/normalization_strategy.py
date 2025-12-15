@@ -14,7 +14,7 @@ class NormType(str, Enum):
 
 class NormStrategy(nn.Module):
     """Base class for different normalization strategies."""
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, **kwargs):
         super().__init__()
         self.dim = dim
 
@@ -25,7 +25,7 @@ class RMSNormStrategy(NormStrategy):
     """
     Parameter-free RMSNorm (no scale).
     """
-    def __init__(self, dim: int, eps: float = 1e-6):
+    def __init__(self, dim: int, eps: float = 1e-6, **kwargs):
         super().__init__(dim)
         self.eps = eps
 
@@ -39,7 +39,7 @@ class LearnableRMSNormStrategy(NormStrategy):
     RMSNorm with a learnable scale parameter (gamma).
     Equivalent to LLaMA-style RMSNorm.
     """
-    def __init__(self, dim: int, eps: float = 1e-6):
+    def __init__(self, dim: int, eps: float = 1e-6, **kwargs):
         super().__init__(dim)
         self.eps = eps
         self.gamma = nn.Parameter(torch.empty(dim))
@@ -51,7 +51,7 @@ class LearnableRMSNormStrategy(NormStrategy):
 
 class LayerNormStrategy(NormStrategy):
     """Standard LayerNorm wrapper."""
-    def __init__(self, dim: int, eps: float = 1e-5, elementwise_affine: bool = True):
+    def __init__(self, dim: int, eps: float = 1e-5, elementwise_affine: bool = True, **kwargs):
         super().__init__(dim)
         self.ln = nn.LayerNorm(dim, eps=eps, elementwise_affine=elementwise_affine)
 
@@ -83,6 +83,7 @@ class TorusNormStrategy(NormStrategy):
         radius: float | None = None,   # per-group radius in R^group_size
         eps: float = 1e-6,
         learnable_radius: bool = False,
+        **kwargs,
     ):
         super().__init__(dim)
 
@@ -135,7 +136,7 @@ class TorusNormStrategy(NormStrategy):
 
 class IdentityNormStrategy(NormStrategy):
     """No-op normalization (for ablations: 'no norm')."""
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, **kwargs):
         super().__init__(dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

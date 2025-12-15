@@ -40,12 +40,12 @@ MLP_TYPE=default                         # choose from: default, column, row, fu
 MLP_TYPE_QKV=default                     # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
-PRE_ATTN_NORM_TYPE=rms
+PRE_ATTN_NORM_TYPE=learnable_rms
 FINAL_NORM_TYPE=rms
 
 USE_MUON=false
 
-export WANDB_NOTES="Baseline with learnable RMSNorm, fixed seed, no preattn norm change"
+export WANDB_NOTES="Baseline with learnable RMSNorm, used to compare torus norm performance"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='

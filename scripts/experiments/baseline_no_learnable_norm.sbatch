@@ -30,7 +30,7 @@ export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
 NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=baseline-rms               # adjust as you like
+WANDB_RUN=baseline-rms           # adjust as you like
 
 # Normalization hyperparameters
 NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
