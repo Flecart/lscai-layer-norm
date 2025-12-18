@@ -118,20 +118,17 @@ class TorusNormStrategy(NormStrategy):
         3) rescale each group to the target radius
         4) reshape back to (..., D)
         """
-        orig_shape = x.shape
-        D = x.size(-1)
-        group_size = self.group_size
-        num_groups = D // group_size
+        lead = x.shape[:-1]
+        D = x.shape[-1]
+        G = self.group_size
+        num_groups = D // G
 
-        x_groups = x.reshape(-1, num_groups, group_size)      # (-1, G, group_size)
-        norms = x_groups.norm(dim=-1, keepdim=True)           # (-1, G, 1)
-
-        # radius as a scalar; PyTorch will put it on the right device/dtype in arithmetic
-        scale = self.radius / (norms + self.eps)
-        x_proj = x_groups * scale
-
-        out = x_proj.reshape(orig_shape)
+        xg = x.view(*lead, num_groups, G)                 # no "-1"
+        norms = xg.norm(dim=-1, keepdim=True)
+        scale = (self.radius / (norms + self.eps))
+        out = (xg * scale).view(*lead, D)
         return out
+
 
 
 class IdentityNormStrategy(NormStrategy):

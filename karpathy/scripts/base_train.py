@@ -133,6 +133,20 @@ def main():
     # Compute init
     device_type = autodetect_device_type() if device_type == "" else device_type
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
+
+    # after: ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
+    if device_type == "cuda" and (attention_strategy == "pair_scaled" or norm_type == "torus"):
+        # Avoid cuDNN SDPA backend (can trigger huge materialization in compiled backward)
+        torch.backends.cuda.enable_cudnn_sdp(False)
+        # Prefer flash / mem-efficient if available
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+
+    # log what’s enabled
+    print0(f"SDP backends | flash={torch.backends.cuda.flash_sdp_enabled()} "
+        f"mem_efficient={torch.backends.cuda.mem_efficient_sdp_enabled()} "
+        f"cudnn={torch.backends.cuda.cudnn_sdp_enabled()}")
+
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type == "cuda" else nullcontext()
     synchronize = torch.cuda.synchronize if device_type == "cuda" else lambda: None
@@ -214,6 +228,13 @@ def main():
         for module in orig_model.modules():
             if isinstance(module, CausalSelfAttention):
                 raise ValueError("CausalSelfAttention modules are not allowed when using pair_scaled attention strategy.")
+
+
+    # assert that if the norm_type is torus, attention strategy default, then there are no PairScaledAttention modules
+    if model_config_kwargs.get("norm_type") == "torus" and model_config_kwargs.get("attention_strategy") == "default":
+        for module in orig_model.modules():
+            if module.__class__.__name__ == "PairScaledAttention":
+                raise ValueError("PairScaledAttention modules are not allowed when using default attention strategy with torus norm.")
 
     model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
     num_params = sum(p.numel() for p in model.parameters())

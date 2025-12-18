@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_torus_norm_everywhere_attention_balance
+#SBATCH --job-name=nanochat_torus_norm_everywhere_attention_default
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,12 +9,13 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/torus_norm_everywhere_attention_balance_%j.out
-#SBATCH --error=logs/torus_norm_everywhere_attention_balance_%j.err
+#SBATCH --output=logs/torus_norm_everywhere_attention_default_%j.out
+#SBATCH --error=logs/torus_norm_everywhere_attention_default_%j.err
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export OMP_NUM_THREADS=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
 set -eo pipefail
@@ -38,17 +39,16 @@ NORM_EPS=1e-6                            # epsilon value for normalization layer
 MLP_TYPE=default                         # choose from: default, column, row, full, patched
 EMBED_NORM_TYPE=torus
 FINAL_NORM_TYPE=torus
-ATTENTION_STRATEGY=pair_scaled            # choose from: default, pair_scaled
-GROUP_SIZE_TORUS_NORM=128                 # only used if NORM_TYPE is torus
-
-WANDB_RUN="torus-norm-attention-balance-gs${GROUP_SIZE_TORUS_NORM}"            # adjust as you like
-
+ATTENTION_STRATEGY=default            # choose from: default, pair_scaled
+GROUP_SIZE_TORUS_NORM=2                 # only used if NORM_TYPE is torus
 
 QK_NORM_TYPE=torus
 PRE_ATTN_NORM_TYPE=torus
 USE_MUON=false
 
-export WANDB_NOTES="Torus normalization everywhere with new attention strategy"
+WANDB_RUN="torus-norm-default-attention-gs${GROUP_SIZE_TORUS_NORM}"            # adjust as you like
+
+export WANDB_NOTES="Torus normalization everywhere with default attention"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='

@@ -11,7 +11,7 @@
 #SBATCH --container-writable
 #SBATCH --output=logs/torus_group_size_%A_%a.out
 #SBATCH --error=logs/torus_group_size_%A_%a.err
-#SBATCH --array=0-6
+#SBATCH --array=0-2
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
@@ -26,7 +26,7 @@ echo "[sbatch-master] SLURM_NODEID:   $SLURM_NODEID"
 echo "[sbatch-master] SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
 # -------------------- CONFIG GRID --------------------
-GROUP_SIZES=(2 4 8 16 32 64 128)   # <- sweep these
+GROUP_SIZES=(8 16 128)   # <- sweep these
 ID=${SLURM_ARRAY_TASK_ID}
 GROUP_SIZE_TORUS_NORM=${GROUP_SIZES[$ID]}
 
