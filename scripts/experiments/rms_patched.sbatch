@@ -37,7 +37,7 @@ WANDB_RUN=rms-patched               # adjust as you like
 NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                           # epsilon value for normalization layers
 MLP_TYPE=patched                         # choose from: default, column, row, full, patched
-MLP_TYPE_QKV=rms                     # choose from: default, column, row, full, patched
+MLP_TYPE_QKV=patched                     # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
