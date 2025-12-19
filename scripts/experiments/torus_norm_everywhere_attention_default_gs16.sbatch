@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nanochat_column
+#SBATCH --job-name=nanochat_torus_norm_everywhere_attention_default_gs16
 #SBATCH --account=large-sc-2
 #SBATCH --partition=normal
 #SBATCH --nodes=1
@@ -9,12 +9,13 @@
 #SBATCH --time=10:00:00
 #SBATCH --environment=ngc_pt_jan
 #SBATCH --container-writable
-#SBATCH --output=logs/column_%j.out
-#SBATCH --error=logs/column_%j.err
+#SBATCH --output=logs/torus_norm_everywhere_attention_default_gs16_%j.out
+#SBATCH --error=logs/torus_norm_everywhere_attention_default_gs16_%j.err
 
 export TORCH_SHOW_FULL_TRACEBACK=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export OMP_NUM_THREADS=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
 set -eo pipefail
@@ -30,22 +31,24 @@ export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
 export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
-NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=rms-column               # adjust as you like
+NPROC_PER_NODE=4                           # == gpus-per-node
 
 # Normalization hyperparameters
-NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
-NORM_EPS=1e-6                           # epsilon value for normalization layers
-MLP_TYPE=column                         # choose from: default, column, row, full, patched
-MLP_TYPE_QKV=default                     # choose from: default, column, row, full, patched
+NORM_TYPE=torus                          # choose from: layernorm, rms, learnable_rms, none, torus
+NORM_EPS=1e-6                            # epsilon value for normalization layers
+MLP_TYPE=default                         # choose from: default, column, row, full, patched
+EMBED_NORM_TYPE=torus
+FINAL_NORM_TYPE=torus
+ATTENTION_STRATEGY=default            # choose from: default, pair_scaled
+GROUP_SIZE_TORUS_NORM=16                 # only used if NORM_TYPE is torus
 
-QK_NORM_TYPE=rms
-PRE_ATTN_NORM_TYPE=rms
-FINAL_NORM_TYPE=rms
-
+QK_NORM_TYPE=torus
+PRE_ATTN_NORM_TYPE=torus
 USE_MUON=false
 
-export WANDB_NOTES="RMSNorm with column MLP fused weights, seed fixed, no preattn norm change"
+WANDB_RUN="torus-norm-default-attention-gs${GROUP_SIZE_TORUS_NORM}"
+
+export WANDB_NOTES="Torus normalization everywhere with new attention strategy"
 
 echo "[sbatch-master] launching srun/torchrun"
 CMD='
@@ -90,11 +93,14 @@ python3 -m torch.distributed.run \
     --norm_type='"$NORM_TYPE"' \
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
+    --embed_norm_type='"$EMBED_NORM_TYPE"' \
+    --final_norm_type='"$FINAL_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
     --mlp_type='"$MLP_TYPE"' \
-    --mlp_type_qkv='"$MLP_TYPE_QKV"' \
-    --final_norm_type='"$FINAL_NORM_TYPE"' \
-    --use_muon='"$USE_MUON"'
+    --use_muon='"$USE_MUON"' \
+    --attention_strategy='"$ATTENTION_STRATEGY"' \
+    --group_size_torus_norm='"$GROUP_SIZE_TORUS_NORM"'
+    
 '
 
 srun bash -c "$CMD"

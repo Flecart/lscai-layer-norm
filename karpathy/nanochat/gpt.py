@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 from nanochat.common import get_dist_info, print0
 from nanochat.muon import Muon, DistMuon
 from nanochat.adamw import DistAdamW
@@ -39,9 +40,13 @@ class GPTConfig:
     norm_eps: float | None = None  # used e.g. for RMSNorm
     
     mlp_type: str = "default"  # "default", "column", "row", "full", "patched"
+    mlp_type_qkv: str = "default"  # "default", "column", "row", "full", "patched"
 
     embed_norm_type: str = "rms"
     final_norm_type: str = "rms"
+
+    group_size_torus_norm: int = 2    # only used if norm_type is "torus"
+    attention_strategy: str = "default"  # "default", "pair_scaled"
     
     # ANGELO: rms was the Karpathy default one, I don't think we need to mess with this norm.
     qk_norm_type: str | None = "rms"  # if None, reuse norm_type
@@ -64,6 +69,125 @@ def apply_rotary_emb(x, cos, sin):
     out = out.to(x.dtype) # ensure input/output dtypes match
     return out
 
+
+
+class PairScaledCausalSelfAttention(nn.Module):
+    def __init__(self, config, layer_idx):
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.n_head = config.n_head
+        self.n_kv_head = config.n_kv_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+
+        assert self.n_embd % self.n_head == 0
+        assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
+
+        # For now, keep it simple/consistent: scaling is defined over full n_embd,
+        # so we require k to have the same total head layout as q.
+        # (If you really want GQA here, we can adapt it, but this is the clean fast version.)
+        assert self.n_kv_head == self.n_head, "pair/group scaling assumes n_kv_head == n_head (no GQA)."
+
+        # Torus group size (G). You said config.torus_norm_group_size
+        G = getattr(config, "torus_norm_group_size", None)
+        if G is None:
+            # fallback to your earlier naming if needed
+            G = getattr(config, "group_size_torus_norm", None)
+        assert G is not None, "Need config.torus_norm_group_size (or config.group_size_torus_norm)."
+        self.group_size = int(G)
+        assert self.group_size >= 2
+        assert self.n_embd % self.group_size == 0, "n_embd must be divisible by torus_norm_group_size."
+        assert self.head_dim % self.group_size == 0, "head_dim must be divisible by torus_norm_group_size."
+
+        self.groups_total = self.n_embd // self.group_size
+        self.groups_per_head = self.head_dim // self.group_size
+
+        # Projections
+        self.c_q = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_head * self.head_dim, bias=False)
+        self.c_k = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_v = build_mlp_strategy(config.mlp_type_qkv, self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+
+        if hasattr(self.c_q, "column_parameters") and hasattr(self.c_k, "column_parameters") and hasattr(self.c_v, "column_parameters"):
+            self.c_k.column_parameters = self.c_q.column_parameters
+            self.c_v.column_parameters = self.c_q.column_parameters
+
+        self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+
+        # QK norm
+        # Pass the torus group size into the norm strategy if you want torus on q/k
+        self.qk_norm = build_norm_strategy(
+            NormType(config.qk_norm_type),
+            self.head_dim,
+            eps=config.norm_eps,
+            group_size_torus_norm=self.group_size,   # <-- align with torus grouping
+        )
+
+        # Learnable scaling per torus-group over the FULL embedding (n_embd/G)
+        # alpha = exp(log_alpha); we apply sqrt(alpha) to Q and K
+        self.log_alpha = nn.Parameter(torch.zeros(self.groups_total))  # init alpha=1
+
+    def _apply_group_scaling_qk(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        t: (B, T, H, head_dim)
+        scales each torus group of size G by sqrt(alpha_group).
+
+        log_alpha has shape (n_embd/G,).
+        We view it as (H, head_dim/G) to match head partitioning.
+        """
+        # (groups_total,) -> (H, groups_per_head)
+        scale_groups = torch.exp(0.5 * self.log_alpha).view(self.n_head, self.groups_per_head)
+
+        # expand each group over its G coordinates: (H, groups_per_head*G) == (H, head_dim)
+        scale_coords = scale_groups.repeat_interleave(self.group_size, dim=-1)
+
+        # broadcast to (B, T, H, head_dim)
+        return t * scale_coords.view(1, 1, self.n_head, self.head_dim)
+
+    def forward(self, x, cos_sin, kv_cache):
+        B, T, C = x.size()
+
+        q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+        k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+        v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+
+        cos, sin = cos_sin
+        q = apply_rotary_emb(q, cos, sin)
+        k = apply_rotary_emb(k, cos, sin)
+
+        q = self.qk_norm(q)
+        k = self.qk_norm(k)
+
+        # group scaling aligned with torus groups over full embedding
+        q = self._apply_group_scaling_qk(q)
+        k = self._apply_group_scaling_qk(k)
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        if kv_cache is not None:
+            k, v = kv_cache.insert_kv(self.layer_idx, k, v)
+
+        Tq, Tk = q.size(2), k.size(2)
+
+        # since we asserted n_kv_head == n_head, enable_gqa is false here
+        if kv_cache is None or Tq == Tk:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=False)
+        elif Tq == 1:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=False)
+        else:
+            attn_mask = torch.zeros((Tq, Tk), dtype=torch.bool, device=q.device)
+            prefix_len = Tk - Tq
+            if prefix_len > 0:
+                attn_mask[:, :prefix_len] = True
+            attn_mask[:, prefix_len:] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, enable_gqa=False)
+
+        y = y.transpose(1, 2).contiguous().view(B, T, -1)
+        return self.c_proj(y)
+
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
@@ -74,15 +198,45 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = self.n_embd // self.n_head
         assert self.n_embd % self.n_head == 0
         assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
-        self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
-        self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
-        self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        
+        if config.mlp_type != "default":
+            assert self.n_head == self.n_kv_head, "When using fused MLP strategies, please set n_head == n_kv_head for simplicity."
+        
+        # self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+        self.c_q = build_mlp_strategy(
+            config.mlp_type_qkv,
+            self.n_embd,
+            self.n_head * self.head_dim,
+            bias=False
+        )
+        # self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_k = build_mlp_strategy(
+            config.mlp_type_qkv,
+            self.n_embd,
+            self.n_kv_head * self.head_dim,
+            bias=False
+        )
+        # self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_v = build_mlp_strategy(
+            config.mlp_type_qkv,
+            self.n_embd,
+            self.n_kv_head * self.head_dim,
+            bias=False
+        )
+        
+        # tie weights for q,k,v projections if column_parameter is present
+        # this should make it identical to using nn.Linear and lrms
+        if hasattr(self.c_q, "column_parameters") and hasattr(self.c_k, "column_parameters") and hasattr(self.c_v, "column_parameters"):
+            self.c_k.column_parameters = self.c_q.column_parameters
+            self.c_v.column_parameters = self.c_q.column_parameters
+        
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
 
         self.qk_norm = build_norm_strategy(
             NormType(config.qk_norm_type),
             self.head_dim,
-            eps=config.norm_eps
+            eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
 
@@ -158,7 +312,14 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
-        self.attn = CausalSelfAttention(config, layer_idx)
+
+        if config.attention_strategy == "pair_scaled":
+            self.attn = PairScaledCausalSelfAttention(config, layer_idx)
+        elif config.attention_strategy == "default":
+            self.attn = CausalSelfAttention(config, layer_idx)
+        else:
+            raise ValueError(f"Unknown attention_strategy: {config.attention_strategy}")
+
         self.mlp = MLP(config)
 
         # Removing this for simplicity of the analysis.
@@ -167,11 +328,13 @@ class Block(nn.Module):
             NormType(config.pre_attn_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
         self.pre_mlp_norm = build_norm_strategy(
             NormType(config.norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
 
@@ -217,11 +380,13 @@ class GPT(nn.Module):
             NormType(config.embed_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
         self.final_norm = build_norm_strategy(
             NormType(config.final_norm_type),
             config.n_embd,
             eps=config.norm_eps,
+            group_size_torus_norm=config.group_size_torus_norm,
         )
 
         # Debug flag to avoid spamming prints every forward
@@ -304,6 +469,16 @@ class GPT(nn.Module):
                             )
                         else:
                             print(f"[BlockMLPStrategy block_scale check] {name}.block_scale OK (all ones, shape={bs.shape})")
+                    elif isinstance(module, PairScaledCausalSelfAttention):
+                        la = module.log_alpha
+                        if not torch.allclose(la, torch.zeros_like(la), atol=1e-6):
+                            raise RuntimeError(
+                                f"[PairScaledAttn log_alpha check] {name}.log_alpha is not all zeros. "
+                                f"mean={la.mean().item():.6f}, min={la.min().item():.6f}, max={la.max().item():.6f}"
+                            )
+                        else:
+                            print(f"[PairScaledAttn log_alpha check] {name}.log_alpha OK (all zeros, n={la.numel()})")
+
         # --- END DEBUG ---
 
 
@@ -344,17 +519,23 @@ class GPT(nn.Module):
 
         elif isinstance(module, ColumnMLPFusedStrategy):
             nn.init.ones_(module.norm_parameters)
+            self._init_weights(module.linear)
 
         elif isinstance(module, RowMLPFusedStrategy):
             nn.init.ones_(module.norm_parameters)
-
+            self._init_weights(module.linear)
+            
         elif isinstance(module, FullMLPFusedStrategy):
             nn.init.ones_(module.column_parameters)
             nn.init.ones_(module.row_parameters)
+            self._init_weights(module.linear)
 
         elif isinstance(module, BlockMLPStrategy):
             nn.init.ones_(module.block_scale)
-
+            self._init_weights(module.linear)
+        
+        elif isinstance(module, PairScaledCausalSelfAttention):
+            nn.init.zeros_(module.log_alpha)  # alpha = exp(0) = 1
 
 
 
@@ -410,7 +591,11 @@ class GPT(nn.Module):
             print(f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}")
 
         # Create the Muon optimizer for the linear layers
-        block_params = list(block_params)
+        block_params = (
+            list(self.transformer.h.parameters())
+            + list(self.embed_norm.parameters())
+            + list(self.final_norm.parameters())
+        )
         matrix_params = [p for p in block_params if p.ndim == 2]
         rmsnorm_params = [p for p in block_params if p.ndim == 1]
         if rank == 0:
@@ -446,7 +631,7 @@ class GPT(nn.Module):
         else:
             # see muon init, copying that part here.
             for size in {p.numel() for p in matrix_params}:
-                group = dict(params=[p for p in matrix_params if p.numel() == size])
+                group = dict(params=[p for p in matrix_params if p.numel() == size], lr=matrix_lr * dmodel_lr_scale)
                 adam_groups.append(group)
 
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)

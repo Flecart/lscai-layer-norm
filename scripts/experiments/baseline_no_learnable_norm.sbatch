@@ -30,15 +30,19 @@ export MASTER_PORT=12345         # pick a free port
 export WORLD_SIZE=$(( SLURM_NNODES * SLURM_NTASKS_PER_NODE ))
 
 NPROC_PER_NODE=4                 # == gpus-per-node
-WANDB_RUN=baseline-rms               # adjust as you like
+WANDB_RUN=baseline-rms           # adjust as you like
 
 # Normalization hyperparameters
 NORM_TYPE=rms                   # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                   # epsilon value for normalization layers
 MLP_TYPE=default                # choose from: default, column, row, full, patched
+MLP_TYPE_QKV=default            # choose from: default, column, row, full, patched
+
+USE_MUON=false
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
+FINAL_NORM_TYPE=rms
 
 export WANDB_NOTES="Baseline with RMSNorm"
 
@@ -86,7 +90,10 @@ python3 -m torch.distributed.run \
     --qk_norm_type='"$QK_NORM_TYPE"' \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
-    --mlp_type='"$MLP_TYPE"'
+    --mlp_type='"$MLP_TYPE"' \
+    --mlp_type_qkv='"$MLP_TYPE_QKV"' \
+    --final_norm_type='"$FINAL_NORM_TYPE"' \
+    --use_muon='"$USE_MUON"'
 '
 
 srun bash -c "$CMD"

@@ -18,9 +18,9 @@ from contextlib import nullcontext
 
 import torch
 
-from nanochat.gpt import GPT, GPTConfig
+from nanochat.gpt import GPT, GPTConfig, CausalSelfAttention
 from nanochat.dataloader import tokenizing_distributed_data_loader
-from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type
+from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type, get_dist_info
 from nanochat.tokenizer import get_tokenizer, get_token_bytes
 from nanochat.checkpoint_manager import save_checkpoint
 from nanochat.loss_eval import evaluate_bpb
@@ -28,6 +28,39 @@ from nanochat.engine import Engine
 from scripts.base_eval import evaluate_model
 from torch.distributed.elastic.multiprocessing.errors import record
 import wandb
+import random
+import numpy as np
+
+
+
+def seed_everything(seed: int = 42):
+    
+    # 1. Set the seed for Python's built-in random module
+    random.seed(seed)
+    
+    # 2. Set the seed for NumPy (crucial for data augmentation/transforms)
+    np.random.seed(seed)
+    
+    # 3. Set the seed for PyTorch (CPU)
+    torch.manual_seed(seed)
+    
+    # 4. Set the seed for PyTorch (GPU/CUDA)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # Essential if using multiple GPUs
+    
+    # 5. Determine how hash values are calculated (for sets/dictionaries)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    
+    # 6. Configure CuDNN (The "Black Box" part)
+    # Prevents CuDNN from choosing the "fastest" convolution algorithm, 
+    # which can vary between runs.
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"Global seed set to {seed}")
+
+# Call it immediately
+seed_everything(42)
 
 # -----------------------------------------------------------------------------
 # User settings
@@ -44,11 +77,17 @@ init_type = "scaled"      # "scaled", "xavier", "kaiming"
 # Normalization
 norm_type = "rms"               # "rms", "learnable_rms", "layernorm", "none"
 mlp_type = "default"            # "default", "column", "row", "full", "patched"
+mlp_type_qkv = "default"        # "default", "column", "row", "full", "patched"
+
+group_size_torus_norm = 2    # only used if norm_type is "torus"
+
 qk_norm_type = "rms"            # "" => use norm_type; or "none", "rms", ...
 pre_attn_norm_type = "rms"      # "" => use norm_type; or "none", "rms", ...
 
 embed_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
 final_norm_type = "rms"         # "" => use norm_type; or "none", "rms", ...
+
+attention_strategy = "default"  # "default", "pair_scaled"
 
 norm_eps = None            # eps for RMSNorm / learnable RMS
 
@@ -64,7 +103,9 @@ total_batch_size = 524288 # total desired batch size, in #tokens
 embedding_lr = 0.2 # learning rate for the embedding parameters (Adam)
 unembedding_lr = 0.004 # learning rate for the unembedding parameters (Adam)
 weight_decay = 0.0 # weight decay for the embedding/unembedding parameters (Adam)
-matrix_lr = 0.02 # learning rate for the matrix parameters (Muon)
+
+matrix_lr = 0.02 if use_muon == "true" else 0.001 # learning rate for the matrix parameters (Muon/AdamW)
+
 grad_clip = 1.0 # gradient clipping value (0.0 = disabled)
 warmup_ratio = 0.0 # ratio of iterations for LR warmup
 warmdown_ratio = 0.2 # ratio of iterations for LR warmdown
@@ -92,6 +133,20 @@ def main():
     # Compute init
     device_type = autodetect_device_type() if device_type == "" else device_type
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
+
+    # after: ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
+    if device_type == "cuda" and (attention_strategy == "pair_scaled" or norm_type == "torus"):
+        # Avoid cuDNN SDPA backend (can trigger huge materialization in compiled backward)
+        torch.backends.cuda.enable_cudnn_sdp(False)
+        # Prefer flash / mem-efficient if available
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+
+    # log what’s enabled
+    print0(f"SDP backends | flash={torch.backends.cuda.flash_sdp_enabled()} "
+        f"mem_efficient={torch.backends.cuda.mem_efficient_sdp_enabled()} "
+        f"cudnn={torch.backends.cuda.cudnn_sdp_enabled()}")
+
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type == "cuda" else nullcontext()
     synchronize = torch.cuda.synchronize if device_type == "cuda" else lambda: None
@@ -137,13 +192,16 @@ def main():
         n_embd=model_dim,
         norm_type=norm_type,
         mlp_type=mlp_type,
+        mlp_type_qkv=mlp_type_qkv,
         norm_eps=norm_eps,
         qk_norm_type=(qk_norm_type if qk_norm_type != "" else None),
         pre_attn_norm_type=(pre_attn_norm_type if pre_attn_norm_type != "" else None),
         embed_norm_type=(embed_norm_type if embed_norm_type != "" else None),
         final_norm_type=(final_norm_type if final_norm_type != "" else None),
         init_type=init_type,
-        use_muon=(use_muon == "true"),
+        attention_strategy=attention_strategy,
+        use_muon=use_muon,
+        group_size_torus_norm=group_size_torus_norm,
     )
     with torch.device("meta"):
         model_config = GPTConfig(**model_config_kwargs)
@@ -151,6 +209,33 @@ def main():
     model.to_empty(device=device)
     model.init_weights()
     orig_model = model # original, uncompiled model, for saving raw model state_dict
+
+    # Print model parameter names with "log_alpha" in them
+    ddp, rank, *_ = get_dist_info()
+    if (not ddp) or (rank == 0):
+        names = [n for (n, p) in orig_model.named_parameters() if "log_alpha" in n]
+        print0(f"Found {len(names)} log_alpha params:")
+        for n in names[:10]:
+            print0("  " + n)
+
+    # assert that if attention_strategy is pair_scaled, norm_type and qk_norm_type are torus
+    if model_config_kwargs.get("attention_strategy") == "pair_scaled":
+        if model_config_kwargs.get("norm_type") != "torus" or model_config_kwargs.get("qk_norm_type") != "torus":
+            raise ValueError("When using pair_scaled attention strategy, norm_type and qk_norm_type must be 'torus'.")
+
+    # if attention strategy is pair_scaled, assert that there are no CausalSelfAttention modules
+    if model_config_kwargs.get("attention_strategy") == "pair_scaled":
+        for module in orig_model.modules():
+            if isinstance(module, CausalSelfAttention):
+                raise ValueError("CausalSelfAttention modules are not allowed when using pair_scaled attention strategy.")
+
+
+    # assert that if the norm_type is torus, attention strategy default, then there are no PairScaledAttention modules
+    if model_config_kwargs.get("norm_type") == "torus" and model_config_kwargs.get("attention_strategy") == "default":
+        for module in orig_model.modules():
+            if module.__class__.__name__ == "PairScaledAttention":
+                raise ValueError("PairScaledAttention modules are not allowed when using default attention strategy with torus norm.")
+
     model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
     num_params = sum(p.numel() for p in model.parameters())
     print0(f"Number of parameters: {num_params:,}")

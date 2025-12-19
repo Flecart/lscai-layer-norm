@@ -37,9 +37,12 @@ WANDB_RUN=rms-full               # adjust as you like
 NORM_TYPE=rms                           # choose from: layernorm, rms, learnable_rms, none
 NORM_EPS=1e-6                           # epsilon value for normalization layers
 MLP_TYPE=full                           # choose from: default, column, row, full, patched
+MLP_TYPE_QKV=default                       # choose from: default, column, row, full, patched
 
 QK_NORM_TYPE=rms
 PRE_ATTN_NORM_TYPE=rms
+FINAL_NORM_TYPE=rms
+
 USE_MUON=false
 
 export WANDB_NOTES="RMSNorm with full MLP fused weights"
@@ -89,6 +92,7 @@ python3 -m torch.distributed.run \
     --pre_attn_norm_type='"$PRE_ATTN_NORM_TYPE"' \
     --norm_eps='"$NORM_EPS"' \
     --mlp_type='"$MLP_TYPE"' \
+    --mlp_type_qkv='"$MLP_TYPE_QKV"' \
     --use_muon='"$USE_MUON"'
 '
 

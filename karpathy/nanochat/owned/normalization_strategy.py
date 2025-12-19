@@ -14,7 +14,7 @@ class NormType(str, Enum):
 
 class NormStrategy(nn.Module):
     """Base class for different normalization strategies."""
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, **kwargs):
         super().__init__()
         self.dim = dim
 
@@ -25,7 +25,7 @@ class RMSNormStrategy(NormStrategy):
     """
     Parameter-free RMSNorm (no scale).
     """
-    def __init__(self, dim: int, eps: float = 1e-6):
+    def __init__(self, dim: int, eps: float = 1e-6, **kwargs):
         super().__init__(dim)
         self.eps = eps
 
@@ -39,7 +39,7 @@ class LearnableRMSNormStrategy(NormStrategy):
     RMSNorm with a learnable scale parameter (gamma).
     Equivalent to LLaMA-style RMSNorm.
     """
-    def __init__(self, dim: int, eps: float = 1e-6):
+    def __init__(self, dim: int, eps: float = 1e-6, **kwargs):
         super().__init__(dim)
         self.eps = eps
         self.gamma = nn.Parameter(torch.empty(dim))
@@ -51,7 +51,7 @@ class LearnableRMSNormStrategy(NormStrategy):
 
 class LayerNormStrategy(NormStrategy):
     """Standard LayerNorm wrapper."""
-    def __init__(self, dim: int, eps: float = 1e-5, elementwise_affine: bool = True):
+    def __init__(self, dim: int, eps: float = 1e-5, elementwise_affine: bool = True, **kwargs):
         super().__init__(dim)
         self.ln = nn.LayerNorm(dim, eps=eps, elementwise_affine=elementwise_affine)
 
@@ -79,31 +79,32 @@ class TorusNormStrategy(NormStrategy):
     def __init__(
         self,
         dim: int,
-        group_size: int = 2,
+        group_size_torus_norm: int = 2,
         radius: float | None = None,   # per-group radius in R^group_size
         eps: float = 1e-6,
         learnable_radius: bool = False,
+        **kwargs,
     ):
         super().__init__(dim)
 
-        if group_size <= 1:
-            raise ValueError(f"group_size must be >= 2, got {group_size}.")
-        if dim % group_size != 0:
+        if group_size_torus_norm <= 1:
+            raise ValueError(f"group_size_torus_norm must be >= 2, got {group_size_torus_norm}.")
+        if dim % group_size_torus_norm != 0:
             raise ValueError(
-                f"TorusNormStrategy requires dim % group_size == 0, "
-                f"got dim={dim}, group_size={group_size}."
+                f"TorusNormStrategy requires dim % group_size_torus_norm == 0, "
+                f"got dim={dim}, group_size_torus_norm={group_size_torus_norm}."
             )
 
         self.eps = eps
-        self.group_size = group_size
-        num_groups = dim // group_size
+        self.group_size = group_size_torus_norm
+        num_groups = dim // group_size_torus_norm
 
         if learnable_radius:
             raise NotImplementedError("learnable_radius not supported with meta-init yet")
 
         # Pick radius s.t. total ||x|| ≈ sqrt(dim): r_group = sqrt(group_size)
         if radius is None:
-            radius = math.sqrt(float(group_size))
+            radius = math.sqrt(float(group_size_torus_norm))
         # Just store as a Python float; no buffer, no Parameter
         self.radius = float(radius)
 
@@ -117,25 +118,22 @@ class TorusNormStrategy(NormStrategy):
         3) rescale each group to the target radius
         4) reshape back to (..., D)
         """
-        orig_shape = x.shape
-        D = x.size(-1)
-        group_size = self.group_size
-        num_groups = D // group_size
+        lead = x.shape[:-1]
+        D = x.shape[-1]
+        G = self.group_size
+        num_groups = D // G
 
-        x_groups = x.reshape(-1, num_groups, group_size)      # (-1, G, group_size)
-        norms = x_groups.norm(dim=-1, keepdim=True)           # (-1, G, 1)
-
-        # radius as a scalar; PyTorch will put it on the right device/dtype in arithmetic
-        scale = self.radius / (norms + self.eps)
-        x_proj = x_groups * scale
-
-        out = x_proj.reshape(orig_shape)
+        xg = x.view(*lead, num_groups, G)                 # no "-1"
+        norms = xg.norm(dim=-1, keepdim=True)
+        scale = (self.radius / (norms + self.eps))
+        out = (xg * scale).view(*lead, D)
         return out
+
 
 
 class IdentityNormStrategy(NormStrategy):
     """No-op normalization (for ablations: 'no norm')."""
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, **kwargs):
         super().__init__(dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
