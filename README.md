@@ -50,6 +50,7 @@ cp wandb.env.example .wandb.env
 ## Running Experiments
 
 ### Test the Tokenizer
+This step also downloads the training data
 ```bash
 sbatch run_tok_train.sbatch
 ```
@@ -70,16 +71,19 @@ sbatch scripts/experiments/rms_full.sbatch     # Full bidirectional scaling
 sbatch scripts/experiments/rms_patched.sbatch  # Block-wise/patch scaling
 
 # TorusNorm Experiments
-sbatch scripts/experiments/torus_norm_everywhere.sbatch  # TorusNorm at all positions
-sbatch scripts/experiments/torus_norm_pre_mlp.sbatch     # TorusNorm only before MLPs
+sbatch scripts/experiments/torus_norm_everywhere_attention_default.sbatch      # TorusNorm with standard attention
+sbatch scripts/experiments/torus_norm_everywhere_attention_strategy.sbatch     # TorusNorm with modified attention
 ```
+
+You can modify hyper-parameters inside the respective sbatch scripts
 
 ### View Logs
 
 All training logs are saved to `/logs/` with job-specific filenames containing the SLURM job ID.
 
 
-## Nematus (Alternative Backend)
+## Nematus (Alternative Model)
+The objective was to run experiments on different models and tasks. However, this setup relies on tensorflow and it still has some issues running on the clariden cluster.
 
 Bootstrap Nematus environment (takes ~30 minutes):
 
